@@ -10,6 +10,13 @@ internal sealed class RadialActionMenuForm : Form
     private const float CenterY = 190;
     private const float OuterRadius = 172;
     private const float InnerRadius = 57;
+    private const int WsExTopMost = 0x00000008;
+    private const int WsExToolWindow = 0x00000080;
+    private const int WsExNoActivate = 0x08000000;
+    private const int WmMouseActivate = 0x0021;
+    private const int MaNoActivate = 3;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpShowWindow = 0x0040;
     private readonly ShellTarget _target;
     private readonly NativePoint _triggerPoint;
     private readonly System.Windows.Forms.Timer _closeTimer;
@@ -43,15 +50,39 @@ internal sealed class RadialActionMenuForm : Form
 
     private RadialTheme Theme { get; }
 
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.ExStyle |= WsExTopMost | WsExToolWindow | WsExNoActivate;
+            return parameters;
+        }
+    }
+
     public void ShowAtTrigger()
     {
         var screen = Screen.FromPoint(new Point(_triggerPoint.X, _triggerPoint.Y)).WorkingArea;
-        var x = Math.Clamp(_triggerPoint.X - ClientSize.Width / 2, screen.Left, screen.Right - ClientSize.Width);
-        var y = Math.Clamp(_triggerPoint.Y - ClientSize.Height / 2, screen.Top, screen.Bottom - ClientSize.Height);
+        var maxX = Math.Max(screen.Left, screen.Right - Width);
+        var maxY = Math.Max(screen.Top, screen.Bottom - Height);
+        var x = Math.Clamp(_triggerPoint.X - Width / 2, screen.Left, maxX);
+        var y = Math.Clamp(_triggerPoint.Y - Height / 2, screen.Top, maxY);
         Location = new Point(x, y);
         Show();
-        Activate();
+        if (!SetWindowPos(Handle, new IntPtr(-1), x, y, Width, Height, SwpNoActivate | SwpShowWindow))
+            Console.Error.WriteLine($"SetWindowPos failed: Win32 error {System.Runtime.InteropServices.Marshal.GetLastWin32Error()}.");
         _idleCloseTimer.Start();
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WmMouseActivate)
+        {
+            // Keep Explorer active while routing mouse input to the topmost wheel.
+            m.Result = (IntPtr)MaNoActivate;
+            return;
+        }
+        base.WndProc(ref m);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -242,6 +273,9 @@ internal sealed class RadialActionMenuForm : Form
             Invalidate();
         }
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
     protected override void Dispose(bool disposing)
     {
