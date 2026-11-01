@@ -1,0 +1,16 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle
+    Name="RadialShell Setup"
+    Manufacturer="RadialShell Project"
+    Version="$(var.Version)"
+    UpgradeCode="{B653B7DC-1AA2-4D90-A2A0-4C718C4FAE6A}"
+    PerMachine="no"
+    Compressed="yes">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="standard" />
+    </BootstrapperApplication>
+    <Chain>
+      <MsiPackage SourceFile="$(var.MsiPath)" />
+    </Chain>
+  </Bundle>
+</Wix>

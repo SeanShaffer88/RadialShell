@@ -1,0 +1,28 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="RadialShell"
+    Manufacturer="RadialShell Project"
+    Version="$(var.Version)"
+    UpgradeCode="{F2F68E53-8C60-4878-8896-E722715A5A4D}"
+    Scope="perUser"
+    InstallerVersion="500">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of RadialShell is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="MainFeature" Title="RadialShell" Level="1">
+      <ComponentGroupRef Id="ApplicationFiles" />
+    </Feature>
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="InstallFolder" Name="RadialShell" />
+      </Directory>
+    </StandardDirectory>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="ApplicationFiles" Directory="InstallFolder" Source="$(var.PublishDir)">
+      <Files Include="**" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

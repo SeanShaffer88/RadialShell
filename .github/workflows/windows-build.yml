@@ -1,4 +1,4 @@
-name: Windows executable
+name: Windows release
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_release:
-        description: Publish a portable ZIP and GitHub release for the supplied version
+        description: Publish x64 installers, a portable ZIP, and a GitHub release for the supplied version
         required: true
         default: false
         type: boolean
@@ -93,8 +93,75 @@ jobs:
           $zipName = "RadialShell-v$version-x64-Portable.zip"
           $zipPath = Join-Path $PWD "artifacts\$zipName"
           Compress-Archive -Path $payload -DestinationPath $zipPath -CompressionLevel Optimal -Force
-          $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $zipName" | Set-Content '.\artifacts\SHA256SUMS.txt' -Encoding ascii
+
+      - name: Create per-user x64 installers and release checksums
+        shell: pwsh
+        env:
+          PROJECT_VERSION: ${{ steps.package.outputs.version }}
+          WIX_VERSION: 5.0.2
+        run: |
+          $version = $env:PROJECT_VERSION
+          $source = '.\artifacts\RadialShell-win-x64'
+          $installSource = Join-Path $PWD 'artifacts\installer-stage'
+          New-Item -ItemType Directory -Path $installSource -Force | Out-Null
+          Get-ChildItem -LiteralPath $source -Force |
+            Where-Object { $_.Name -ne 'data' } |
+            ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $installSource -Recurse -Force }
+          Copy-Item '.\README.md' $installSource
+          Copy-Item '.\LICENSE' $installSource
+
+          dotnet tool install --global wix --version $env:WIX_VERSION
+          $wix = Join-Path $env:USERPROFILE '.dotnet\tools\wix.exe'
+          if (!(Test-Path $wix)) { throw 'WiX CLI was not installed.' }
+          & $wix extension add "WixToolset.Bal.wixext/$env:WIX_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install the WiX Burn extension.' }
+
+          $msiName = "RadialShell-v$version-x64.msi"
+          $setupName = "RadialShell-v$version-x64-Setup.exe"
+          $msiPath = Join-Path $PWD "artifacts\$msiName"
+          $setupPath = Join-Path $PWD "artifacts\$setupName"
+          $publishDir = [IO.Path]::GetFullPath($installSource)
+          & $wix build '.\packaging\installer\Product.wxs' -arch x64 -d "Version=$version" -d "PublishDir=$publishDir" -o $msiPath
+          if ($LASTEXITCODE -ne 0) { throw 'WiX failed to build the per-user MSI.' }
+          & $wix build '.\packaging\installer\Bundle.wxs' -arch x64 -ext WixToolset.Bal.wixext -d "Version=$version" -d "MsiPath=$msiPath" -o $setupPath
+          if ($LASTEXITCODE -ne 0) { throw 'WiX failed to build the Setup EXE.' }
+
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\RadialShell'
+          $installedExe = Join-Path $installRoot 'RadialShell.exe'
+          $setupInstall = Start-Process -FilePath $setupPath -ArgumentList '/quiet /norestart' -Wait -PassThru
+          if ($setupInstall.ExitCode -notin @(0, 3010) -or !(Test-Path $installedExe)) {
+            throw "Setup EXE per-user installation failed with exit code $($setupInstall.ExitCode)."
+          }
+          & $installedExe --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed.' }
+          $setupUninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/x', "`"$msiPath`"", '/qn', '/norestart') -Wait -PassThru
+          if ($setupUninstall.ExitCode -notin @(0, 3010) -or (Test-Path $installedExe)) {
+            throw "Setup EXE uninstall failed with exit code $($setupUninstall.ExitCode)."
+          }
+          if (!(Test-Path (Join-Path $installRoot 'data\logs\radialshell.jsonl'))) {
+            throw 'Uninstall did not preserve adjacent user data.'
+          }
+
+          $msiInstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', "`"$msiPath`"", '/qn', '/norestart') -Wait -PassThru
+          if ($msiInstall.ExitCode -notin @(0, 3010) -or !(Test-Path $installedExe)) {
+            throw "MSI per-user installation failed with exit code $($msiInstall.ExitCode)."
+          }
+          $msiUninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/x', "`"$msiPath`"", '/qn', '/norestart') -Wait -PassThru
+          if ($msiUninstall.ExitCode -notin @(0, 3010) -or (Test-Path $installedExe)) {
+            throw "MSI uninstall failed with exit code $($msiUninstall.ExitCode)."
+          }
+
+          $assetPaths = @(
+            (Join-Path $PWD "artifacts\RadialShell-v$version-x64-Portable.zip"),
+            $msiPath,
+            $setupPath
+          )
+          $manifest = foreach ($path in ($assetPaths | Sort-Object)) {
+            $file = Get-Item -LiteralPath $path
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($file.Name)"
+          }
+          $manifest | Set-Content '.\artifacts\SHA256SUMS.txt' -Encoding ascii
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -104,6 +171,8 @@ jobs:
             .\artifacts\RadialShell-win-x64\RadialShell.exe
             .\artifacts\RadialShell-win-x64\RadialShell.exe.sha256
             .\artifacts\RadialShell-v*-x64-Portable.zip
+            .\artifacts\RadialShell-v*-x64-Setup.exe
+            .\artifacts\RadialShell-v*-x64.msi
             .\artifacts\SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 90
@@ -148,19 +217,46 @@ jobs:
             throw "Pushed tag $env:REF_NAME does not match expected tag $tag."
           }
 
-          $zipName = "RadialShell-$tag-x64-Portable.zip"
-          $zip = Get-ChildItem -LiteralPath 'release-assets' -Recurse -File -Filter $zipName | Select-Object -First 1
-          $checksums = Get-ChildItem -LiteralPath 'release-assets' -Recurse -File -Filter 'SHA256SUMS.txt' | Select-Object -First 1
-          if ($null -eq $zip -or $null -eq $checksums) { throw 'Release assets are incomplete.' }
-          $checksumLine = Get-Content -LiteralPath $checksums.FullName | Where-Object { $_ -match [regex]::Escape($zipName) } | Select-Object -First 1
-          if ([string]::IsNullOrWhiteSpace($checksumLine)) { throw 'SHA256SUMS.txt does not list the portable archive.' }
-          $expectedHash = ($checksumLine -split '\s+')[0].ToLowerInvariant()
-          $actualHash = (Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($expectedHash -ne $actualHash) { throw 'Portable archive checksum verification failed.' }
+          $expectedNames = @(
+            "RadialShell-$tag-x64-Setup.exe",
+            "RadialShell-$tag-x64.msi",
+            "RadialShell-$tag-x64-Portable.zip",
+            'SHA256SUMS.txt'
+          )
+          $assets = foreach ($name in $expectedNames) {
+            $asset = Get-ChildItem -LiteralPath 'release-assets' -Recurse -File -Filter $name | Select-Object -First 1
+            if ($null -eq $asset) { throw "Release asset is missing: $name" }
+            $asset
+          }
+          $checksums = $assets | Where-Object { $_.Name -eq 'SHA256SUMS.txt' } | Select-Object -First 1
+          $manifestLines = Get-Content -LiteralPath $checksums.FullName
+          foreach ($asset in ($assets | Where-Object { $_.Name -ne 'SHA256SUMS.txt' })) {
+            $checksumLine = $manifestLines | Where-Object { $_ -match ('\s{2}' + [regex]::Escape($asset.Name) + '$') } | Select-Object -First 1
+            if ([string]::IsNullOrWhiteSpace($checksumLine)) { throw "SHA256SUMS.txt does not list $($asset.Name)." }
+            $expectedHash = ($checksumLine -split '\s+')[0].ToLowerInvariant()
+            $actualHash = (Get-FileHash -LiteralPath $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($expectedHash -ne $actualHash) { throw "Checksum verification failed for $($asset.Name)." }
+          }
 
-          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
-            gh release create $tag $zip.FullName $checksums.FullName --target $env:TARGET_SHA --title "RadialShell $tag" --notes 'Self-contained x64 portable release. This build is unsigned. Verify the archive with SHA256SUMS.txt.'
+          $payloads = $assets | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | ForEach-Object { $_.FullName }
+          $payloads += $checksums.FullName
+          $notes = 'Self-contained x64 release. Setup EXE and MSI install per-user under %LOCALAPPDATA%\Programs\RadialShell without elevation or external runtime prerequisites. No startup behavior is configured. Verify all package assets with SHA256SUMS.txt. This build is unsigned.'
+          gh release view $tag *> $null
+          $releaseExists = $LASTEXITCODE -eq 0
+          if ($releaseExists) {
+            $uploadArgs = @('release', 'upload', $tag) + $payloads + @('--clobber')
+            gh @uploadArgs
+            if ($LASTEXITCODE -ne 0) { throw 'Could not upload the validated assets to the existing GitHub release.' }
+            gh release edit $tag --title "RadialShell $tag" --notes $notes
+            if ($LASTEXITCODE -ne 0) { throw 'Could not update the GitHub release notes.' }
+          }
+          elseif ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            $createArgs = @('release', 'create', $tag) + $payloads + @('--target', $env:TARGET_SHA, '--title', "RadialShell $tag", '--notes', $notes)
+            gh @createArgs
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create the GitHub release.' }
           }
           else {
-            gh release create $tag $zip.FullName $checksums.FullName --verify-tag --title "RadialShell $tag" --notes 'Self-contained x64 portable release. This build is unsigned. Verify the archive with SHA256SUMS.txt.'
+            $createArgs = @('release', 'create', $tag) + $payloads + @('--verify-tag', '--title', "RadialShell $tag", '--notes', $notes)
+            gh @createArgs
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create the GitHub release.' }
           }
