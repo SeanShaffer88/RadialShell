@@ -45,8 +45,7 @@ internal static class RadialThemeSettings
     private sealed record Preferences(string? Theme);
 
     private static readonly string SettingsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "RadialShell", "settings.json");
+        AppContext.BaseDirectory, "data", "settings.json");
 
     public static RadialTheme Load()
     {
@@ -73,17 +72,39 @@ internal static class RadialThemeSettings
             return false;
         }
 
+        string? temporaryPath = null;
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
-            var json = JsonSerializer.Serialize(new Preferences(theme.Name), new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(SettingsPath, json);
+            var directory = Path.GetDirectoryName(SettingsPath)!;
+            Directory.CreateDirectory(directory);
+            temporaryPath = Path.Combine(directory, $"settings.{Guid.NewGuid():N}.tmp");
+            using (var stream = new FileStream(
+                temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                bufferSize: 4096, FileOptions.WriteThrough))
+            {
+                JsonSerializer.Serialize(stream, new Preferences(theme.Name), new JsonSerializerOptions { WriteIndented = true });
+                stream.Flush(flushToDisk: true);
+            }
+
+            if (File.Exists(SettingsPath))
+                File.Replace(temporaryPath, SettingsPath, destinationBackupFileName: null);
+            else
+                File.Move(temporaryPath, SettingsPath);
+            temporaryPath = null;
             return true;
         }
         catch (Exception ex)
         {
             error = $"Could not save theme settings: {ex.Message}";
             return false;
+        }
+        finally
+        {
+            if (temporaryPath is not null)
+            {
+                try { File.Delete(temporaryPath); }
+                catch { }
+            }
         }
     }
 }
