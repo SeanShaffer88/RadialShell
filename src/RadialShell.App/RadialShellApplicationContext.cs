@@ -1,18 +1,18 @@
 using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Runtime.InteropServices;
+using System.IO;
 using System.Windows.Forms;
 using RadialShell.Core;
 
 namespace RadialShell.App;
 
-/// <summary>Owns the active hook and marshals resolved targets to the WinForms UI thread.</summary>
+/// <summary>Owns tray state, the active hook, and UI-thread shell actions.</summary>
 internal sealed class RadialShellApplicationContext : ApplicationContext
 {
     private readonly EscapeDispatcher _dispatcher = new();
     private readonly ShellTargetResolver _resolver = new();
     private MouseGestureListener? _listener;
     private RadialActionMenuForm? _menu;
+    private ThemePickerForm? _themePicker;
     private readonly NotifyIcon _trayIcon = new();
     private readonly ContextMenuStrip _trayMenu = new();
     private Icon? _enabledIcon;
@@ -24,8 +24,14 @@ internal sealed class RadialShellApplicationContext : ApplicationContext
         _dispatcher.OnEscapePressed += () => _menu?.Close();
         _ = _dispatcher.Handle;
 
-        _enabledIcon = CreateStatusIcon(enabled: true);
-        _disabledIcon = CreateStatusIcon(enabled: false);
+        _enabledIcon = LoadTrayIcon("RadialShell-enabled.ico");
+        _disabledIcon = LoadTrayIcon("RadialShell-disabled.ico");
+        var themeItem = new ToolStripMenuItem("Theme &Picker...")
+        {
+            AccessibleName = "Open theme picker",
+            ToolTipText = "Choose and save a radial menu theme."
+        };
+        themeItem.Click += (_, _) => ShowThemePicker();
         var exitItem = new ToolStripMenuItem("E&xit")
         {
             AccessibleName = "Exit RadialShell",
@@ -33,6 +39,8 @@ internal sealed class RadialShellApplicationContext : ApplicationContext
         };
         exitItem.Click += (_, _) => ExitThread();
         _trayMenu.ShowItemToolTips = true;
+        _trayMenu.Items.Add(themeItem);
+        _trayMenu.Items.Add(new ToolStripSeparator());
         _trayMenu.Items.Add(exitItem);
         _trayIcon.ContextMenuStrip = _trayMenu;
         _trayIcon.MouseClick += OnTrayMouseClick;
@@ -97,42 +105,32 @@ internal sealed class RadialShellApplicationContext : ApplicationContext
             : "RadialShell: Disabled | Left-click toggles; right-click Exit";
     }
 
-    private static Icon CreateStatusIcon(bool enabled)
+    private static Icon LoadTrayIcon(string fileName)
     {
-        const int size = 32;
-        const float center = size / 2f;
-        using var bitmap = new Bitmap(size, size);
-        using (var graphics = Graphics.FromImage(bitmap))
-        {
-            graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var background = new SolidBrush(enabled ? Color.FromArgb(24, 132, 112) : Color.FromArgb(112, 119, 128));
-            using var spoke = new Pen(Color.White, 2f);
-            using var hub = new SolidBrush(Color.White);
-            graphics.FillEllipse(background, 2f, 2f, 28f, 28f);
-            for (var index = 0; index < 8; index++)
-            {
-                var angle = Math.PI * index / 4;
-                var endX = center + (float)Math.Cos(angle) * 10f;
-                var endY = center + (float)Math.Sin(angle) * 10f;
-                graphics.DrawLine(spoke, center, center, endX, endY);
-            }
-            graphics.FillEllipse(hub, center - 3f, center - 3f, 6f, 6f);
-        }
-
-        var handle = bitmap.GetHicon();
-        try
-        {
-            using var temporary = Icon.FromHandle(handle);
-            return (Icon)temporary.Clone();
-        }
-        finally
-        {
-            _ = DestroyIcon(handle);
-        }
+        var path = Path.Combine(AppContext.BaseDirectory, "Assets", fileName);
+        using var icon = new Icon(path);
+        return (Icon)icon.Clone();
     }
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool DestroyIcon(IntPtr iconHandle);
+    private void ShowThemePicker()
+    {
+        if (_themePicker is { IsDisposed: false })
+        {
+            _themePicker.Activate();
+            return;
+        }
+
+        _dispatcher.UnregisterEscape();
+        CloseActionMenu();
+        var picker = new ThemePickerForm(RadialThemeSettings.Load());
+        picker.FormClosed += (_, _) =>
+        {
+            if (ReferenceEquals(_themePicker, picker))
+                _themePicker = null;
+        };
+        _themePicker = picker;
+        picker.Show();
+    }
 
     private void OnGestureResolved(NativePoint point)
     {
@@ -197,6 +195,10 @@ internal sealed class RadialShellApplicationContext : ApplicationContext
         _listener?.Dispose();
         _listener = null;
         CloseActionMenu();
+        var picker = _themePicker;
+        _themePicker = null;
+        picker?.Close();
+        picker?.Dispose();
         _trayIcon.Visible = false;
         _trayIcon.MouseClick -= OnTrayMouseClick;
         _trayIcon.Dispose();

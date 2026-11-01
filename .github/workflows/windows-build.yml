@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_release:
-        description: Publish x64 installers, a portable ZIP, and a GitHub release for the supplied version
+        description: Publish the x64 MSI, portable ZIP, and GitHub release for the supplied version
         required: true
         default: false
         type: boolean
@@ -108,15 +108,11 @@ jobs:
 
       - name: Install pinned WiX toolchain
         shell: pwsh
-        env:
-          WIX_VERSION: 5.0.2
         run: |
-          dotnet tool install --global wix --version $env:WIX_VERSION
+          dotnet tool install --global wix --version 5.0.2
           if ($LASTEXITCODE -ne 0) { throw 'Could not install the pinned WiX CLI.' }
           $wix = Join-Path $env:USERPROFILE '.dotnet\tools\wix.exe'
           if (!(Test-Path $wix)) { throw 'WiX CLI was not installed.' }
-          & $wix extension add "WixToolset.Bal.wixext/$env:WIX_VERSION"
-          if ($LASTEXITCODE -ne 0) { throw 'Could not install the WiX Burn extension.' }
 
       - name: Build x64 per-user MSI
         shell: pwsh
@@ -129,43 +125,6 @@ jobs:
           $msiPath = Join-Path $PWD "artifacts\RadialShell-v$version-x64.msi"
           & $wix build '.\packaging\installer\Product.wxs' -arch x64 -d "Version=$version" -d "PublishDir=$publishDir" -o $msiPath
           if ($LASTEXITCODE -ne 0) { throw 'WiX failed to build the per-user MSI.' }
-
-      - name: Build x64 Setup EXE
-        shell: pwsh
-        env:
-          PROJECT_VERSION: ${{ steps.package.outputs.version }}
-        run: |
-          $version = $env:PROJECT_VERSION
-          $wix = Join-Path $env:USERPROFILE '.dotnet\tools\wix.exe'
-          $msiPath = Join-Path $PWD "artifacts\RadialShell-v$version-x64.msi"
-          $setupPath = Join-Path $PWD "artifacts\RadialShell-v$version-x64-Setup.exe"
-          & $wix build '.\packaging\installer\Bundle.wxs' -arch x64 -ext WixToolset.Bal.wixext -d "Version=$version" -d "MsiPath=$msiPath" -o $setupPath
-          if ($LASTEXITCODE -ne 0) { throw 'WiX failed to build the Setup EXE.' }
-
-      - name: Smoke-test per-user Setup EXE installation
-        shell: pwsh
-        env:
-          PROJECT_VERSION: ${{ steps.package.outputs.version }}
-        run: |
-          $version = $env:PROJECT_VERSION
-          $setupPath = Join-Path $PWD "artifacts\RadialShell-v$version-x64-Setup.exe"
-          $msiPath = Join-Path $PWD "artifacts\RadialShell-v$version-x64.msi"
-          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\RadialShell'
-          $installedExe = Join-Path $installRoot 'RadialShell.exe'
-          $setupInstall = Start-Process -FilePath $setupPath -ArgumentList '/quiet /norestart' -Wait -PassThru
-          if ($setupInstall.ExitCode -notin @(0, 3010) -or !(Test-Path $installedExe)) {
-            throw "Setup EXE per-user installation failed with exit code $($setupInstall.ExitCode)."
-          }
-          & $installedExe --self-test
-          if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed.' }
-          $uninstallArgs = "/x `"$msiPath`" /qn /norestart"
-          $uninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList $uninstallArgs -Wait -PassThru
-          if ($uninstall.ExitCode -notin @(0, 3010) -or (Test-Path $installedExe)) {
-            throw "Setup EXE uninstall failed with exit code $($uninstall.ExitCode)."
-          }
-          if (!(Test-Path (Join-Path $installRoot 'data\logs\radialshell.jsonl'))) {
-            throw 'Uninstall did not preserve adjacent user data.'
-          }
 
       - name: Smoke-test per-user MSI installation
         shell: pwsh
@@ -181,11 +140,19 @@ jobs:
           if ($install.ExitCode -notin @(0, 3010) -or !(Test-Path $installedExe)) {
             throw "MSI per-user installation failed with exit code $($install.ExitCode)."
           }
+          foreach ($icon in @('RadialShell-enabled.ico', 'RadialShell-disabled.ico')) {
+            if (!(Test-Path (Join-Path $installRoot "Assets\$icon"))) { throw "Installed tray icon is missing: $icon" }
+          }
+          & $installedExe --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed.' }
+          $dataLog = Join-Path $installRoot 'data\logs\radialshell.jsonl'
+          if (!(Test-Path $dataLog)) { throw 'Installed application did not create its adjacent JSONL log.' }
           $uninstallArgs = "/x `"$msiPath`" /qn /norestart"
           $uninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList $uninstallArgs -Wait -PassThru
           if ($uninstall.ExitCode -notin @(0, 3010) -or (Test-Path $installedExe)) {
             throw "MSI uninstall failed with exit code $($uninstall.ExitCode)."
           }
+          if (!(Test-Path $dataLog)) { throw 'MSI uninstall did not preserve adjacent user data.' }
 
       - name: Generate release asset checksums
         shell: pwsh
@@ -195,8 +162,7 @@ jobs:
           $version = $env:PROJECT_VERSION
           $assetPaths = @(
             (Join-Path $PWD "artifacts\RadialShell-v$version-x64-Portable.zip"),
-            (Join-Path $PWD "artifacts\RadialShell-v$version-x64.msi"),
-            (Join-Path $PWD "artifacts\RadialShell-v$version-x64-Setup.exe")
+            (Join-Path $PWD "artifacts\RadialShell-v$version-x64.msi")
           )
           $manifest = foreach ($path in ($assetPaths | Sort-Object)) {
             $file = Get-Item -LiteralPath $path
@@ -213,7 +179,6 @@ jobs:
             .\artifacts\RadialShell-win-x64\RadialShell.exe
             .\artifacts\RadialShell-win-x64\RadialShell.exe.sha256
             .\artifacts\RadialShell-v*-x64-Portable.zip
-            .\artifacts\RadialShell-v*-x64-Setup.exe
             .\artifacts\RadialShell-v*-x64.msi
             .\artifacts\SHA256SUMS.txt
           if-no-files-found: error
@@ -260,7 +225,6 @@ jobs:
           }
 
           $expectedNames = @(
-            "RadialShell-$tag-x64-Setup.exe",
             "RadialShell-$tag-x64.msi",
             "RadialShell-$tag-x64-Portable.zip",
             'SHA256SUMS.txt'
@@ -282,7 +246,7 @@ jobs:
 
           $payloads = $assets | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | ForEach-Object { $_.FullName }
           $payloads += $checksums.FullName
-          $notes = 'Self-contained x64 release. Setup EXE and MSI install per-user under %LOCALAPPDATA%\Programs\RadialShell without elevation or external runtime prerequisites. No startup behavior is configured. Verify all package assets with SHA256SUMS.txt. This build is unsigned.'
+          $notes = 'Self-contained x64 release. The MSI installs per-user under %LOCALAPPDATA%\Programs\RadialShell without elevation or external runtime prerequisites. No startup behavior is configured. Verify the MSI and portable ZIP with SHA256SUMS.txt. This build is unsigned.'
           gh release view $tag *> $null
           $releaseExists = $LASTEXITCODE -eq 0
           if ($releaseExists) {
