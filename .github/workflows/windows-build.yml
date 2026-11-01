@@ -3,7 +3,7 @@ name: Windows executable
 on:
   push:
     branches:
-      - arena/d988fac2-radialshell
+      - arena/fcb73a76-radialshell
   workflow_dispatch:
 
 permissions:
@@ -40,10 +40,19 @@ jobs:
       - name: Smoke-test executable
         run: .\artifacts\RadialShell-win-x64\RadialShell.exe --self-test
 
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $exe = '.\artifacts\RadialShell-win-x64\RadialShell.exe'
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  RadialShell.exe" | Set-Content "$exe.sha256" -Encoding ascii
+
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
           name: RadialShell-win-x64
-          path: .\artifacts\RadialShell-win-x64\RadialShell.exe
+          path: |
+            .\artifacts\RadialShell-win-x64\RadialShell.exe
+            .\artifacts\RadialShell-win-x64\RadialShell.exe.sha256
           if-no-files-found: error
           retention-days: 90

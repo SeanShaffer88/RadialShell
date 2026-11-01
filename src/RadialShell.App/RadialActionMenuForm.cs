@@ -13,6 +13,7 @@ internal sealed class RadialActionMenuForm : Form
     private readonly ShellTarget _target;
     private readonly NativePoint _triggerPoint;
     private readonly System.Windows.Forms.Timer _closeTimer;
+    private readonly System.Windows.Forms.Timer _idleCloseTimer;
     private int _hoveredSlice = -1;
     private string? _status;
 
@@ -36,6 +37,8 @@ internal sealed class RadialActionMenuForm : Form
 
         _closeTimer = new System.Windows.Forms.Timer { Interval = 1200 };
         _closeTimer.Tick += (_, _) => { _closeTimer.Stop(); Close(); };
+        _idleCloseTimer = new System.Windows.Forms.Timer { Interval = 15000 };
+        _idleCloseTimer.Tick += (_, _) => { _idleCloseTimer.Stop(); Close(); };
     }
 
     private RadialTheme Theme { get; }
@@ -48,6 +51,7 @@ internal sealed class RadialActionMenuForm : Form
         Location = new Point(x, y);
         Show();
         Activate();
+        _idleCloseTimer.Start();
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -210,12 +214,6 @@ internal sealed class RadialActionMenuForm : Form
         }
     }
 
-    protected override void OnDeactivate(EventArgs e)
-    {
-        base.OnDeactivate(e);
-        Close();
-    }
-
     private int GetSliceIndex(Point point)
     {
         var dx = point.X - CenterX;
@@ -234,6 +232,7 @@ internal sealed class RadialActionMenuForm : Form
         try
         {
             _status = RadialActionExecutor.Execute(index, _target);
+            _idleCloseTimer.Stop();
             Invalidate();
             _closeTimer.Start();
         }
@@ -247,7 +246,10 @@ internal sealed class RadialActionMenuForm : Form
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
             _closeTimer.Dispose();
+            _idleCloseTimer.Dispose();
+        }
         base.Dispose(disposing);
     }
 }

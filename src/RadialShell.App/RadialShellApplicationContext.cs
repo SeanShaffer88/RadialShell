@@ -51,6 +51,7 @@ internal sealed class RadialShellApplicationContext : ApplicationContext
         _menu?.Dispose();
 
         _menu = new RadialActionMenuForm(target, RadialThemeSettings.Load(), point);
+        _menu.Shown += (_, _) => Console.WriteLine($"Radial wheel shown for {target.Kind} target.");
         _menu.FormClosed += (_, _) => _menu = null;
         _menu.ShowAtTrigger();
     }
