@@ -94,13 +94,9 @@ jobs:
           $zipPath = Join-Path $PWD "artifacts\$zipName"
           Compress-Archive -Path $payload -DestinationPath $zipPath -CompressionLevel Optimal -Force
 
-      - name: Create per-user x64 installers and release checksums
+      - name: Stage installer files
         shell: pwsh
-        env:
-          PROJECT_VERSION: ${{ steps.package.outputs.version }}
-          WIX_VERSION: 5.0.2
         run: |
-          $version = $env:PROJECT_VERSION
           $source = '.\artifacts\RadialShell-win-x64'
           $installSource = Join-Path $PWD 'artifacts\installer-stage'
           New-Item -ItemType Directory -Path $installSource -Force | Out-Null
@@ -110,22 +106,50 @@ jobs:
           Copy-Item '.\README.md' $installSource
           Copy-Item '.\LICENSE' $installSource
 
+      - name: Install pinned WiX toolchain
+        shell: pwsh
+        env:
+          WIX_VERSION: 5.0.2
+        run: |
           dotnet tool install --global wix --version $env:WIX_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install the pinned WiX CLI.' }
           $wix = Join-Path $env:USERPROFILE '.dotnet\tools\wix.exe'
           if (!(Test-Path $wix)) { throw 'WiX CLI was not installed.' }
           & $wix extension add "WixToolset.Bal.wixext/$env:WIX_VERSION"
           if ($LASTEXITCODE -ne 0) { throw 'Could not install the WiX Burn extension.' }
 
-          $msiName = "RadialShell-v$version-x64.msi"
-          $setupName = "RadialShell-v$version-x64-Setup.exe"
-          $msiPath = Join-Path $PWD "artifacts\$msiName"
-          $setupPath = Join-Path $PWD "artifacts\$setupName"
-          $publishDir = [IO.Path]::GetFullPath($installSource)
+      - name: Build x64 per-user MSI
+        shell: pwsh
+        env:
+          PROJECT_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          $version = $env:PROJECT_VERSION
+          $wix = Join-Path $env:USERPROFILE '.dotnet\tools\wix.exe'
+          $publishDir = [IO.Path]::GetFullPath((Join-Path $PWD 'artifacts\installer-stage'))
+          $msiPath = Join-Path $PWD "artifacts\RadialShell-v$version-x64.msi"
           & $wix build '.\packaging\installer\Product.wxs' -arch x64 -d "Version=$version" -d "PublishDir=$publishDir" -o $msiPath
           if ($LASTEXITCODE -ne 0) { throw 'WiX failed to build the per-user MSI.' }
+
+      - name: Build x64 Setup EXE
+        shell: pwsh
+        env:
+          PROJECT_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          $version = $env:PROJECT_VERSION
+          $wix = Join-Path $env:USERPROFILE '.dotnet\tools\wix.exe'
+          $msiPath = Join-Path $PWD "artifacts\RadialShell-v$version-x64.msi"
+          $setupPath = Join-Path $PWD "artifacts\RadialShell-v$version-x64-Setup.exe"
           & $wix build '.\packaging\installer\Bundle.wxs' -arch x64 -ext WixToolset.Bal.wixext -d "Version=$version" -d "MsiPath=$msiPath" -o $setupPath
           if ($LASTEXITCODE -ne 0) { throw 'WiX failed to build the Setup EXE.' }
 
+      - name: Smoke-test per-user Setup EXE installation
+        shell: pwsh
+        env:
+          PROJECT_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          $version = $env:PROJECT_VERSION
+          $setupPath = Join-Path $PWD "artifacts\RadialShell-v$version-x64-Setup.exe"
+          $msiPath = Join-Path $PWD "artifacts\RadialShell-v$version-x64.msi"
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\RadialShell'
           $installedExe = Join-Path $installRoot 'RadialShell.exe'
           $setupInstall = Start-Process -FilePath $setupPath -ArgumentList '/quiet /norestart' -Wait -PassThru
@@ -134,27 +158,45 @@ jobs:
           }
           & $installedExe --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed.' }
-          $setupUninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/x', "`"$msiPath`"", '/qn', '/norestart') -Wait -PassThru
-          if ($setupUninstall.ExitCode -notin @(0, 3010) -or (Test-Path $installedExe)) {
-            throw "Setup EXE uninstall failed with exit code $($setupUninstall.ExitCode)."
+          $uninstallArgs = "/x `"$msiPath`" /qn /norestart"
+          $uninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList $uninstallArgs -Wait -PassThru
+          if ($uninstall.ExitCode -notin @(0, 3010) -or (Test-Path $installedExe)) {
+            throw "Setup EXE uninstall failed with exit code $($uninstall.ExitCode)."
           }
           if (!(Test-Path (Join-Path $installRoot 'data\logs\radialshell.jsonl'))) {
             throw 'Uninstall did not preserve adjacent user data.'
           }
 
-          $msiInstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', "`"$msiPath`"", '/qn', '/norestart') -Wait -PassThru
-          if ($msiInstall.ExitCode -notin @(0, 3010) -or !(Test-Path $installedExe)) {
-            throw "MSI per-user installation failed with exit code $($msiInstall.ExitCode)."
+      - name: Smoke-test per-user MSI installation
+        shell: pwsh
+        env:
+          PROJECT_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          $version = $env:PROJECT_VERSION
+          $msiPath = Join-Path $PWD "artifacts\RadialShell-v$version-x64.msi"
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\RadialShell'
+          $installedExe = Join-Path $installRoot 'RadialShell.exe'
+          $installArgs = "/i `"$msiPath`" /qn /norestart"
+          $install = Start-Process -FilePath 'msiexec.exe' -ArgumentList $installArgs -Wait -PassThru
+          if ($install.ExitCode -notin @(0, 3010) -or !(Test-Path $installedExe)) {
+            throw "MSI per-user installation failed with exit code $($install.ExitCode)."
           }
-          $msiUninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/x', "`"$msiPath`"", '/qn', '/norestart') -Wait -PassThru
-          if ($msiUninstall.ExitCode -notin @(0, 3010) -or (Test-Path $installedExe)) {
-            throw "MSI uninstall failed with exit code $($msiUninstall.ExitCode)."
+          $uninstallArgs = "/x `"$msiPath`" /qn /norestart"
+          $uninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList $uninstallArgs -Wait -PassThru
+          if ($uninstall.ExitCode -notin @(0, 3010) -or (Test-Path $installedExe)) {
+            throw "MSI uninstall failed with exit code $($uninstall.ExitCode)."
           }
 
+      - name: Generate release asset checksums
+        shell: pwsh
+        env:
+          PROJECT_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          $version = $env:PROJECT_VERSION
           $assetPaths = @(
             (Join-Path $PWD "artifacts\RadialShell-v$version-x64-Portable.zip"),
-            $msiPath,
-            $setupPath
+            (Join-Path $PWD "artifacts\RadialShell-v$version-x64.msi"),
+            (Join-Path $PWD "artifacts\RadialShell-v$version-x64-Setup.exe")
           )
           $manifest = foreach ($path in ($assetPaths | Sort-Object)) {
             $file = Get-Item -LiteralPath $path
