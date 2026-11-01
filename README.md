@@ -20,7 +20,7 @@ The six built-in actions are **Copy Path**, **Copy Name**, **Open Folder**, **Te
 
 ## Themes and preview
 
-Eight built-in palettes are available: **Midnight, Neon Circuit, Frost, Sunset, Emerald, Paper, Ocean,** and **Orchid**. The circular menu uses wedge separation, a center hub, contrasting labels, and hover feedback. Theme preference is saved as human-readable JSON in the executable's adjacent `data\settings.json`, keeping portable state within the application folder.
+Eight built-in palettes are available: **Midnight, Neon Circuit, Frost, Sunset, Emerald, Paper, Ocean,** and **Orchid**. The circular menu uses wedge separation, a center hub, contrasting labels, and hover feedback. Theme preference is saved as human-readable JSON in the executable's adjacent `data\settings.json`, keeping portable state within the application folder. The configuration includes an integer `schema_version`; the loader explicitly migrates the prior unversioned theme file and leaves malformed or unsupported future versions untouched.
 
 ```powershell
 RadialShell.exe --themes
