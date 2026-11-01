@@ -44,7 +44,7 @@ Operational diagnostics are written as JSON Lines to `data\logs\radialshell.json
 
 ## Build and download
 
-The `Windows executable` GitHub Actions workflow builds and tests a self-contained `win-x64` directory, then creates `RadialShell-v{VERSION}-x64-Portable.zip` with a `SHA256SUMS.txt` manifest. Branch runs upload these assets for validation. A GitHub release is published only when the workflow is manually dispatched with `publish_release=true` and a version matching the project version; it creates the corresponding `v{VERSION}` tag. The current build is not code-signed; Windows security software may block or warn on it. Do not disable protection to run it. A checksum confirms download integrity, not that an antivirus detection is harmless; inspect the detection or build from source if it is blocked. To build locally with the .NET 8 SDK on Windows:
+The `Windows executable` GitHub Actions workflow builds and tests a self-contained `win-x64` directory, then creates `RadialShell-v{VERSION}-x64-Portable.zip` with a `SHA256SUMS.txt` manifest. Branch runs upload these assets for validation. A GitHub release is published for a pushed `v{VERSION}` tag after the release workflow rebuilds and validates the package, or via an explicitly enabled manual workflow dispatch with a version matching the project version. The current build is not code-signed; Windows security software may block or warn on it. Do not disable protection to run it. A checksum confirms download integrity, not that an antivirus detection is harmless; inspect the detection or build from source if it is blocked. To build locally with the .NET 8 SDK on Windows:
 
 ```powershell
 dotnet build .\RadialShell.sln --configuration Release

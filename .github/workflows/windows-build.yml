@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - 'arena/**'
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       publish_release:
@@ -107,7 +109,7 @@ jobs:
           retention-days: 90
 
   publish-release:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
     needs: build-and-test
     runs-on: windows-latest
     permissions:
@@ -119,22 +121,29 @@ jobs:
           name: RadialShell-win-x64
           path: release-assets
 
-      - name: Create remote tag and GitHub release
+      - name: Publish GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
           PROJECT_VERSION: ${{ needs.build-and-test.outputs.version }}
           TARGET_SHA: ${{ github.sha }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+$') {
+          $version = $env:RELEASE_VERSION
+          if ([string]::IsNullOrWhiteSpace($version)) { $version = $env:REF_NAME -replace '^v', '' }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
             throw 'Supply a semantic version such as 1.0.0, without a v prefix.'
           }
-          if ($env:RELEASE_VERSION -ne $env:PROJECT_VERSION) {
-            throw "Requested version $env:RELEASE_VERSION does not match project version $env:PROJECT_VERSION."
+          if ($version -ne $env:PROJECT_VERSION) {
+            throw "Requested version $version does not match project version $env:PROJECT_VERSION."
           }
-          $tag = "v$($env:RELEASE_VERSION)"
+          $tag = "v$version"
+          if ($env:EVENT_NAME -eq 'push' -and $env:REF_NAME -ne $tag) {
+            throw "Pushed tag $env:REF_NAME does not match expected tag $tag."
+          }
           $zip = Join-Path $PWD "release-assets\RadialShell-$tag-x64-Portable.zip"
           $checksums = Join-Path $PWD 'release-assets\SHA256SUMS.txt'
           if (!(Test-Path $zip) -or !(Test-Path $checksums)) { throw 'Release assets are incomplete.' }
-          gh release create $tag $zip $checksums --target $env:TARGET_SHA --title "RadialShell $tag" --notes 'Self-contained x64 portable release. Verify the archive with SHA256SUMS.txt.'
+          gh release create $tag $zip $checksums --target $env:TARGET_SHA --title "RadialShell $tag" --notes 'Self-contained x64 portable release. This build is unsigned. Verify the archive with SHA256SUMS.txt.'
