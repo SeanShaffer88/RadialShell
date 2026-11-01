@@ -5,6 +5,16 @@ on:
     branches:
       - 'arena/**'
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish a portable ZIP and GitHub release for the supplied version
+        required: true
+        default: false
+        type: boolean
+      version:
+        description: Semantic release version, without the v prefix
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -15,6 +25,8 @@ env:
 jobs:
   build-and-test:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.package.outputs.version }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -34,7 +46,7 @@ jobs:
         run: >-
           dotnet publish .\src\RadialShell.App\RadialShell.App.csproj
           --configuration Release --runtime win-x64 --self-contained true
-          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:PublishSingleFile=false
           --output .\artifacts\RadialShell-win-x64
 
       - name: Smoke-test executable
@@ -58,12 +70,71 @@ jobs:
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  RadialShell.exe" | Set-Content "$exe.sha256" -Encoding ascii
 
-      - name: Upload executable
+      - name: Create portable release package
+        id: package
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content '.\src\RadialShell.App\RadialShell.App.csproj' -Raw
+          $version = ($project.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid project release version: $version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+          $source = '.\artifacts\RadialShell-win-x64'
+          $payload = Join-Path $PWD 'artifacts\portable-stage\RadialShell'
+          New-Item -ItemType Directory -Path $payload -Force | Out-Null
+          Get-ChildItem -LiteralPath $source -Force |
+            Where-Object { $_.Name -ne 'data' } |
+            ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $payload -Recurse -Force }
+          Copy-Item '.\README.md' $payload
+          Copy-Item '.\LICENSE' $payload
+
+          $zipName = "RadialShell-v$version-x64-Portable.zip"
+          $zipPath = Join-Path $PWD "artifacts\$zipName"
+          Compress-Archive -Path $payload -DestinationPath $zipPath -CompressionLevel Optimal -Force
+          $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $zipName" | Set-Content '.\artifacts\SHA256SUMS.txt' -Encoding ascii
+
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: RadialShell-win-x64
           path: |
             .\artifacts\RadialShell-win-x64\RadialShell.exe
             .\artifacts\RadialShell-win-x64\RadialShell.exe.sha256
+            .\artifacts\RadialShell-v*-x64-Portable.zip
+            .\artifacts\SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 90
+
+  publish-release:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+    needs: build-and-test
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: RadialShell-win-x64
+          path: release-assets
+
+      - name: Create remote tag and GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          PROJECT_VERSION: ${{ needs.build-and-test.outputs.version }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+$') {
+            throw 'Supply a semantic version such as 1.0.0, without a v prefix.'
+          }
+          if ($env:RELEASE_VERSION -ne $env:PROJECT_VERSION) {
+            throw "Requested version $env:RELEASE_VERSION does not match project version $env:PROJECT_VERSION."
+          }
+          $tag = "v$($env:RELEASE_VERSION)"
+          $zip = Join-Path $PWD "release-assets\RadialShell-$tag-x64-Portable.zip"
+          $checksums = Join-Path $PWD 'release-assets\SHA256SUMS.txt'
+          if (!(Test-Path $zip) -or !(Test-Path $checksums)) { throw 'Release assets are incomplete.' }
+          gh release create $tag $zip $checksums --target $env:TARGET_SHA --title "RadialShell $tag" --notes 'Self-contained x64 portable release. Verify the archive with SHA256SUMS.txt.'

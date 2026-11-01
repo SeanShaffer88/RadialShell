@@ -44,10 +44,10 @@ Operational diagnostics are written as JSON Lines to `data\logs\radialshell.json
 
 ## Build and download
 
-The `Windows executable` GitHub Actions workflow builds, tests, publishes, and uploads a self-contained `win-x64` executable plus a SHA-256 checksum on pushes to the active development branch. Download the `RadialShell-win-x64` artifact from the successful workflow run and verify the hash with `Get-FileHash .\RadialShell.exe -Algorithm SHA256`. The current build is not code-signed; Windows security software may block or warn on it. Do not disable protection to run it. A checksum confirms download integrity, not that an antivirus detection is harmless; inspect the detection or build from source if it is blocked. To build locally with the .NET 8 SDK on Windows:
+The `Windows executable` GitHub Actions workflow builds and tests a self-contained `win-x64` directory, then creates `RadialShell-v{VERSION}-x64-Portable.zip` with a `SHA256SUMS.txt` manifest. Branch runs upload these assets for validation. A GitHub release is published only when the workflow is manually dispatched with `publish_release=true` and a version matching the project version; it creates the corresponding `v{VERSION}` tag. The current build is not code-signed; Windows security software may block or warn on it. Do not disable protection to run it. A checksum confirms download integrity, not that an antivirus detection is harmless; inspect the detection or build from source if it is blocked. To build locally with the .NET 8 SDK on Windows:
 
 ```powershell
 dotnet build .\RadialShell.sln --configuration Release
 dotnet run --project .\tests\RadialShell.Core.Tests\RadialShell.Core.Tests.csproj --configuration Release
-dotnet publish .\src\RadialShell.App\RadialShell.App.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --output .\artifacts\RadialShell-win-x64
+dotnet publish .\src\RadialShell.App\RadialShell.App.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=false --output .\artifacts\RadialShell-win-x64
 ```
