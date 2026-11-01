@@ -146,8 +146,8 @@ jobs:
             $iconPath = Join-Path $installRoot "Assets\$icon"
             if (!(Test-Path $iconPath)) { throw "Installed tray icon is missing: $iconPath" }
           }
-          & $installedExe --self-test
-          $selfTestExitCode = $LASTEXITCODE
+          $selfTest = Start-Process -FilePath $installedExe -ArgumentList '--self-test' -Wait -PassThru
+          $selfTestExitCode = $selfTest.ExitCode
           Write-Host "::notice title=MSI test::Installed self-test exit code $selfTestExitCode"
           if ($selfTestExitCode -ne 0) { throw 'Installed application smoke test failed.' }
           $dataLog = Join-Path $installRoot 'data\logs\radialshell.jsonl'
