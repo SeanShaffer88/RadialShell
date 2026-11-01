@@ -276,8 +276,11 @@ internal sealed class RadialActionMenuForm : Form
         }
         catch (Exception ex)
         {
-            _status = ex.GetBaseException().Message;
+            var error = ex.GetBaseException().Message;
+            Console.Error.WriteLine($"Action failed ({RadialActionCatalog.Names[index]}): {error}");
+            _status = error;
             Invalidate();
+            Close();
         }
     }
 
