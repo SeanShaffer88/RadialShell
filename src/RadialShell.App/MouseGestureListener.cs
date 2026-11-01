@@ -9,13 +9,16 @@ internal sealed class MouseGestureListener : IDisposable
 {
     private const int WhMouseLl = 14;
     private const int WmRButtonDown = 0x0204;
+    private const int WmRButtonUp = 0x0205;
     private const int WmQuit = 0x0012;
     private const int VkMenu = 0x12;
     private const uint GaRoot = 2;
     private const uint PmNoRemove = 0;
 
     private readonly Action<NativePoint> _onGesture;
+    private readonly bool _consumeGesture;
     private readonly BlockingCollection<NativePoint> _work = new();
+    private bool _consumeNextRightUp;
     private readonly ManualResetEventSlim _hookReady = new();
     private readonly HookProc _hookProc;
     private Thread? _hookThread;
@@ -25,9 +28,10 @@ internal sealed class MouseGestureListener : IDisposable
     private Exception? _startError;
     private bool _disposed;
 
-    public MouseGestureListener(Action<NativePoint> onGesture)
+    public MouseGestureListener(Action<NativePoint> onGesture, bool consumeGesture = false)
     {
         _onGesture = onGesture;
+        _consumeGesture = consumeGesture;
         _hookProc = HookCallback;
     }
 
@@ -91,14 +95,30 @@ internal sealed class MouseGestureListener : IDisposable
 
     private IntPtr HookCallback(int code, IntPtr wParam, IntPtr lParam)
     {
-        if (code >= 0 && unchecked((int)wParam) == WmRButtonDown &&
-            (GetAsyncKeyState(VkMenu) & 0x8000) != 0)
+        if (code < 0)
+            return CallNextHookEx(_hook, code, wParam, lParam);
+
+        var message = unchecked((int)wParam);
+        if (message == WmRButtonUp && _consumeNextRightUp)
+        {
+            _consumeNextRightUp = false;
+            return (IntPtr)1;
+        }
+
+        if (message == WmRButtonDown && (GetAsyncKeyState(VkMenu) & 0x8000) != 0)
         {
             try
             {
                 var data = Marshal.PtrToStructure<MouseLowLevelHookData>(lParam);
-                if (IsExplorerOrDesktopPoint(data.Point))
+                if (IsExplorerFileViewPoint(data.Point))
+                {
                     _work.Add(data.Point);
+                    if (_consumeGesture)
+                    {
+                        _consumeNextRightUp = true;
+                        return (IntPtr)1;
+                    }
+                }
             }
             catch
             {
@@ -106,24 +126,41 @@ internal sealed class MouseGestureListener : IDisposable
             }
         }
 
-        // This is intentionally a passive prototype. Right-click and the native
-        // context menu continue normally while target discovery is being validated.
         return CallNextHookEx(_hook, code, wParam, lParam);
     }
 
-    private static bool IsExplorerOrDesktopPoint(NativePoint point)
+    private static bool IsExplorerFileViewPoint(NativePoint point)
     {
         var hit = WindowFromPoint(point);
         var root = GetAncestor(hit, GaRoot);
         if (root == IntPtr.Zero)
             return false;
 
+        var rootName = GetWindowClass(root);
+        var isDesktop = rootName is "Progman" or "WorkerW";
+        if (!isDesktop && rootName is not ("CabinetWClass" or "ExploreWClass"))
+            return false;
+
+        // Desktop background windows can be siblings of the icon view; accept them
+        // and let the resolver classify them as the Desktop folder. For Explorer,
+        // require the file-view host so chrome and navigation controls pass through.
+        if (isDesktop)
+            return true;
+        for (var current = hit; current != IntPtr.Zero; current = GetParent(current))
+        {
+            if (GetWindowClass(current) == "SHELLDLL_DefView")
+                return true;
+            if (current == root)
+                break;
+        }
+        return false;
+    }
+
+    private static string GetWindowClass(IntPtr window)
+    {
         var className = new System.Text.StringBuilder(128);
-        _ = GetClassName(root, className, className.Capacity);
-        var name = className.ToString();
-        // Restrict to the well-known shell top-level window classes. Avoid process
-        // inspection or any other potentially blocking work in this hook callback.
-        return name is "CabinetWClass" or "ExploreWClass" or "Progman" or "WorkerW";
+        _ = GetClassName(window, className, className.Capacity);
+        return className.ToString();
     }
 
     public void Dispose()
@@ -176,6 +213,8 @@ internal sealed class MouseGestureListener : IDisposable
     private static extern IntPtr WindowFromPoint(NativePoint point);
     [DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetParent(IntPtr hwnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder className, int maxCount);
     [DllImport("user32.dll", SetLastError = true)]

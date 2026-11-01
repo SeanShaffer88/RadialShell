@@ -94,8 +94,17 @@ internal sealed class ShellTargetResolver
             }
             catch
             {
-                message = "The pointer is over a shell control rather than a file-view item.";
-                return false;
+                if (!isDesktop)
+                {
+                    message = "The pointer is over a shell control rather than a file-view item.";
+                    return false;
+                }
+
+                // WorkerW/Progman wallpaper surfaces sometimes expose an incomplete
+                // accessibility role; when the Desktop namespace itself is hit, use
+                // the Desktop folder as the blank-space target.
+                role = 0;
+                accessibleName = null;
             }
 
             // List-item accessibility names are matched against the shell folder's
@@ -104,7 +113,7 @@ internal sealed class ShellTargetResolver
             if (role == RoleListItem && !string.IsNullOrWhiteSpace(accessibleName))
                 hovered = FindFolderItem(folderObject, accessibleName!);
 
-            var inFolderView = role is RoleList or RoleListItem;
+            var inFolderView = isDesktop || role is (RoleList or RoleListItem);
             var snapshot = new ShellViewSnapshot(
                 currentFolderPath,
                 selected,

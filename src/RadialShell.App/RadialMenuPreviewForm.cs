@@ -5,11 +5,7 @@ namespace RadialShell.App;
 /// <summary>Interactive visual preview for the built-in radial color themes.</summary>
 internal sealed class RadialMenuPreviewForm : Form
 {
-    private static readonly string[] ItemLabels =
-    [
-        "Copy\npath", "Copy\nname", "Open\nfolder",
-        "Terminal\nhere", "POSIX\npath", "Copy\ncontents"
-    ];
+    private static readonly string[] ItemLabels = RadialActionCatalog.Labels.ToArray();
 
     private const float CenterX = 250;
     private const float CenterY = 276;
