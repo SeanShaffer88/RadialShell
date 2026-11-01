@@ -4,7 +4,7 @@ Windows Explorer radial quick-action utility.
 
 ## Target resolution
 
-The target policy handles selected items, an unselected item under the pointer, and blank file-view space (the current folder). Windows resolution uses Shell automation, UI Automation for Explorer's virtualized item rows, and MSAA as a fallback. Non-file-view Explorer controls are filtered in the low-level hook so their normal right-click behavior remains intact. When Windows exposes only the generic `Items View` container, the resolver searches the UIA list-item bounds at the cursor before falling back to the current folder.
+The target policy handles selected items, an unselected item under the pointer, and blank file-view space (the current folder). Windows resolution uses Shell automation, UI Automation for Explorer's virtualized item rows, and MSAA as a fallback. Non-file-view Explorer controls are filtered in the low-level hook so their normal right-click behavior remains intact. When Windows exposes only the generic `Items View` container, the resolver searches UI Automation descendants whose bounds contain the cursor and matches their names against canonical Shell items. It also handles Explorer views that hide file extensions or expose rows as generic/custom controls before falling back to the current folder.
 
 ## Active radial wheel
 
