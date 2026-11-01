@@ -19,7 +19,6 @@ internal sealed class RadialActionMenuForm : Form
     private const uint SwpShowWindow = 0x0040;
     private readonly ShellTarget _target;
     private readonly NativePoint _triggerPoint;
-    private readonly System.Windows.Forms.Timer _closeTimer;
     private readonly System.Windows.Forms.Timer _idleCloseTimer;
     private int _hoveredSlice = -1;
     private string? _status;
@@ -42,8 +41,6 @@ internal sealed class RadialActionMenuForm : Form
         Cursor = Cursors.Hand;
         Region = new Region(CreateRoundedRectangle(new Rectangle(0, 0, 380, 380), 24));
 
-        _closeTimer = new System.Windows.Forms.Timer { Interval = 1200 };
-        _closeTimer.Tick += (_, _) => { _closeTimer.Stop(); Close(); };
         _idleCloseTimer = new System.Windows.Forms.Timer { Interval = 15000 };
         _idleCloseTimer.Tick += (_, _) => { _idleCloseTimer.Stop(); Close(); };
     }
@@ -229,8 +226,18 @@ internal sealed class RadialActionMenuForm : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        if (e.Button == MouseButtons.Left && _hoveredSlice >= 0)
-            ExecuteAction(_hoveredSlice);
+        if (e.Button == MouseButtons.Left)
+        {
+            // Recompute from the click location instead of relying on a prior
+            // WM_MOUSEMOVE; no-activate windows can receive a click first.
+            var clickedSlice = GetSliceIndex(e.Location);
+            Console.WriteLine($"Wheel left-click at {e.Location}; slice={(clickedSlice >= 0 ? clickedSlice + 1 : 0)}.");
+            if (clickedSlice >= 0)
+            {
+                _hoveredSlice = clickedSlice;
+                ExecuteAction(clickedSlice);
+            }
+        }
         else if (e.Button == MouseButtons.Right)
             Close();
     }
@@ -262,10 +269,10 @@ internal sealed class RadialActionMenuForm : Form
     {
         try
         {
-            _status = RadialActionExecutor.Execute(index, _target);
+            var result = RadialActionExecutor.Execute(index, _target);
+            Console.WriteLine($"Action complete: {result}");
             _idleCloseTimer.Stop();
-            Invalidate();
-            _closeTimer.Start();
+            Close();
         }
         catch (Exception ex)
         {
@@ -280,10 +287,7 @@ internal sealed class RadialActionMenuForm : Form
     protected override void Dispose(bool disposing)
     {
         if (disposing)
-        {
-            _closeTimer.Dispose();
             _idleCloseTimer.Dispose();
-        }
         base.Dispose(disposing);
     }
 }
