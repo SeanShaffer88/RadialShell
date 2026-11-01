@@ -142,6 +142,12 @@ jobs:
             Write-Host "::error title=MSI install diagnostics::Exit code $($install.ExitCode); executable exists: $(Test-Path $installedExe); path: $installRoot"
             throw "MSI per-user installation failed with exit code $($install.ExitCode)."
           }
+          $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          $startupEntry = Get-ItemProperty -LiteralPath $runKey -Name RadialShell -ErrorAction SilentlyContinue
+          $expectedStartupCommand = '"' + $installedExe + '"'
+          if ($null -eq $startupEntry -or $startupEntry.RadialShell -ne $expectedStartupCommand) {
+            throw "MSI did not register the expected per-user login command: $expectedStartupCommand"
+          }
           foreach ($icon in @('RadialShell-enabled.ico', 'RadialShell-disabled.ico')) {
             $iconPath = Join-Path $installRoot "Assets\$icon"
             if (!(Test-Path $iconPath)) { throw "Installed tray icon is missing: $iconPath" }
@@ -160,6 +166,10 @@ jobs:
             throw "MSI uninstall failed with exit code $($uninstall.ExitCode)."
           }
           if (!(Test-Path $dataLog)) { throw 'MSI uninstall did not preserve adjacent user data.' }
+          $remainingStartupEntry = Get-ItemProperty -LiteralPath $runKey -Name RadialShell -ErrorAction SilentlyContinue
+          if ($null -ne $remainingStartupEntry -and $null -ne $remainingStartupEntry.RadialShell) {
+            throw 'MSI uninstall did not remove the per-user login registration.'
+          }
 
       - name: Generate release asset checksums
         shell: pwsh
@@ -253,7 +263,7 @@ jobs:
 
           $payloads = $assets | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | ForEach-Object { $_.FullName }
           $payloads += $checksums.FullName
-          $notes = 'Self-contained x64 release. The MSI installs per-user under %LOCALAPPDATA%\Programs\RadialShell without elevation or external runtime prerequisites. No startup behavior is configured. Verify the MSI and portable ZIP with SHA256SUMS.txt. This build is unsigned.'
+          $notes = 'Self-contained x64 release. The MSI installs per-user under %LOCALAPPDATA%\Programs\RadialShell without elevation or external runtime prerequisites. It launches RadialShell after an interactive install and starts it at sign-in by default in the Disabled state; manage the per-user startup entry in Windows Settings > Apps > Startup. Verify the MSI and portable ZIP with SHA256SUMS.txt. This build is unsigned.'
           gh release view $tag *> $null
           $releaseExists = $LASTEXITCODE -eq 0
           if ($releaseExists) {

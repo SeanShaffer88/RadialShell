@@ -18,11 +18,36 @@
         <Directory Id="InstallFolder" Name="RadialShell" />
       </Directory>
     </StandardDirectory>
-  </Package>
 
-  <Fragment>
-    <ComponentGroup Id="ApplicationFiles" Directory="InstallFolder" Source="$(var.PublishDir)">
-      <Files Include="**" />
+    <ComponentGroup Id="ApplicationFiles">
+      <Component Id="ApplicationExecutable" Directory="InstallFolder" Guid="*">
+        <File Id="RadialShellExe" Source="$(var.PublishDir)\RadialShell.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="LoginStartupRegistration" Directory="InstallFolder" Guid="*">
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Microsoft\Windows\CurrentVersion\Run"
+          Name="RadialShell"
+          Type="string"
+          Value="&quot;[InstallFolder]RadialShell.exe&quot;"
+          KeyPath="yes" />
+      </Component>
+      <Files Include="$(var.PublishDir)\**" Directory="InstallFolder">
+        <Exclude Files="$(var.PublishDir)\RadialShell.exe" />
+      </Files>
     </ComponentGroup>
-  </Fragment>
+
+    <CustomAction
+      Id="LaunchRadialShellAfterInstall"
+      FileRef="RadialShellExe"
+      ExeCommand=""
+      Return="asyncNoWait"
+      Impersonate="yes" />
+    <InstallExecuteSequence>
+      <Custom
+        Action="LaunchRadialShellAfterInstall"
+        After="InstallFinalize"
+        Condition="NOT Installed AND UILevel &gt; 2" />
+    </InstallExecuteSequence>
+  </Package>
 </Wix>

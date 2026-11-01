@@ -1,5 +1,6 @@
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Forms;
 using RadialShell.Core;
 
@@ -112,6 +113,13 @@ internal static class Program
 
     private static void RunTrayApplication()
     {
+        using var instanceMutex = new Mutex(true, @"Local\RadialShell.Tray", out var isFirstInstance);
+        if (!isFirstInstance)
+        {
+            RadialLogger.Info("app.instance.already_running", "A RadialShell tray instance is already running in this session.");
+            return;
+        }
+
         InitializeWinForms();
         using var context = new RadialShellApplicationContext();
         try
