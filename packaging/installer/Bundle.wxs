@@ -7,7 +7,9 @@
     PerMachine="no"
     Compressed="yes">
     <BootstrapperApplication>
-      <bal:WixStandardBootstrapperApplication Theme="standard" />
+      <bal:WixStandardBootstrapperApplication
+        Theme="rtfLicense"
+        LicenseFile="$(sys.SOURCEFILEDIR)LICENSE.rtf" />
     </BootstrapperApplication>
     <Chain>
       <MsiPackage SourceFile="$(var.MsiPath)" />
