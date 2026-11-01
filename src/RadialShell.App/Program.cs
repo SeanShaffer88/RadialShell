@@ -14,11 +14,20 @@ internal static class Program
             return 0;
         }
 
+        if (!TryGetLogLevel(args, out var logLevel, out var logLevelError))
+        {
+            Console.Error.WriteLine(logLevelError);
+            return 2;
+        }
+
+        using var logging = RadialLogger.Initialize(logLevel);
+
         if (Has(args, "--self-test"))
         {
             TargetPolicySmokeTests.Run();
             ThemeSmokeTests.Run();
             RadialActionSmokeTests.Run();
+            RadialLoggerSmokeTests.Run();
             var threadId = MouseGestureListener.CurrentNativeThreadIdForTest();
             if (threadId == 0)
                 throw new InvalidOperationException("Win32 GetCurrentThreadId returned zero.");
@@ -37,7 +46,7 @@ internal static class Program
         {
             if (themeArg + 1 >= args.Length)
             {
-                Console.Error.WriteLine("Missing theme name after --theme.");
+                RadialLogger.Error("theme.argument.invalid", "Missing theme name after --theme.");
                 PrintThemes();
                 return 2;
             }
@@ -45,18 +54,18 @@ internal static class Program
             var requested = args[themeArg + 1];
             if (!RadialThemeCatalog.TryFind(requested, out var theme))
             {
-                Console.Error.WriteLine($"Unknown theme '{requested}'.");
+                RadialLogger.Error("theme.not_found", $"Unknown theme '{requested}'.");
                 PrintThemes();
                 return 2;
             }
 
             if (!RadialThemeSettings.Save(theme.Name, out var error))
             {
-                Console.Error.WriteLine(error);
+                RadialLogger.Error("theme.save.failed", error ?? "Could not save theme settings.");
                 return 1;
             }
 
-            Console.WriteLine($"Theme preference saved: {theme.Name}");
+            RadialLogger.Info("theme.saved", $"Theme preference saved: {theme.Name}");
             return 0;
         }
 
@@ -68,7 +77,7 @@ internal static class Program
             {
                 if (!RadialThemeCatalog.TryFind(args[previewArg + 1], out previewTheme))
                 {
-                    Console.Error.WriteLine($"Unknown theme '{args[previewArg + 1]}'.");
+                    RadialLogger.Error("theme.not_found", $"Unknown theme '{args[previewArg + 1]}'.");
                     PrintThemes();
                     return 2;
                 }
@@ -105,10 +114,11 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Could not start RadialShell: {ex.GetBaseException().Message}");
+            RadialLogger.Error("app.start.failed", $"Could not start RadialShell: {ex.GetBaseException().Message}");
             return;
         }
 
+        RadialLogger.Info("app.started", "RadialShell active-wheel mode started.");
         Console.WriteLine("RadialShell is active. Alt + Right-Click in an Explorer file view to open the wheel.");
         Console.WriteLine("Hover a slice and left-click to run it. Press Esc/right-click in the wheel to dismiss; Ctrl+C exits.");
         Console.WriteLine("The native context menu is suppressed only for gestures in the Explorer/Desktop file view.\n");
@@ -138,6 +148,7 @@ internal static class Program
 
     private static void RunListener()
     {
+        RadialLogger.Info("listener.started", "RadialShell diagnostic listener started.");
         Console.WriteLine("RadialShell diagnostic listener is active.");
         Console.WriteLine("Alt + Right-Click an item or blank area in File Explorer/Desktop.");
         Console.WriteLine("This diagnostic observes the gesture only; normal Windows behavior is preserved.");
@@ -146,18 +157,18 @@ internal static class Program
         var resolver = new ShellTargetResolver();
         using var listener = new MouseGestureListener(point =>
         {
-            Console.WriteLine($"Gesture at ({point.X}, {point.Y})");
+            RadialLogger.Info("gesture.detected", $"Alt+right-click at ({point.X}, {point.Y}).");
             if (!resolver.TryResolve(point, out var target, out var message))
             {
-                Console.WriteLine($"  Not resolved: {message}");
+                RadialLogger.Warn("target.unresolved", message);
                 return;
             }
 
-            Console.WriteLine($"  {target!.Kind} ({target.Source})");
+            RadialLogger.Info("target.resolved", $"{target!.Kind} ({target.Source}).");
             if (target.Kind == ShellTargetKind.Folder)
-                Console.WriteLine($"  Folder: {target.FolderPath}");
+                RadialLogger.Info("target.folder", $"Folder: {target.FolderPath}");
             foreach (var item in target.Items)
-                Console.WriteLine($"  {(item.IsDirectory ? "[Folder] " : "[File]   ")}{item.Path}");
+                RadialLogger.Info("target.item", $"{(item.IsDirectory ? "[Folder] " : "[File]   ")}{item.Path}");
         });
 
         try
@@ -167,7 +178,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Could not start listener: {ex.GetBaseException().Message}");
+            RadialLogger.Error("listener.start.failed", $"Could not start listener: {ex.GetBaseException().Message}");
         }
     }
 
@@ -191,7 +202,39 @@ internal static class Program
         Console.WriteLine("  RadialShell.exe --preview [name]  Preview the wheel; ←/→ changes and saves themes");
         Console.WriteLine("  RadialShell.exe --themes          List built-in themes");
         Console.WriteLine("  RadialShell.exe --theme <name>    Save the preferred theme");
-        Console.WriteLine("\nThe diagnostic listener is passive and does not suppress the native context menu.");
+        Console.WriteLine("  RadialShell.exe --log-level <level> Set error|warn|info|debug|trace (default: info)");
+        Console.WriteLine("  --verbose / --debug / --trace     Increase diagnostic detail");
+        Console.WriteLine("\nStructured logs are written under .\\data\\logs and rotated within a bounded size.");
+        Console.WriteLine("The diagnostic listener is passive and does not suppress the native context menu.");
+    }
+
+    internal static bool TryGetLogLevel(IReadOnlyList<string> args, out RadialLogLevel level, out string? error)
+    {
+        level = RadialLogLevel.Info;
+        error = null;
+        var optionIndex = IndexOf(args, "--log-level");
+        if (optionIndex >= 0)
+        {
+            if (args.Count(arg => string.Equals(arg, "--log-level", StringComparison.OrdinalIgnoreCase)) != 1 ||
+                optionIndex + 1 >= args.Count || args[optionIndex + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                error = "Use --log-level <error|warn|info|debug|trace> once.";
+                return false;
+            }
+
+            if (!RadialLogger.TryParseLevel(args[optionIndex + 1], out level))
+            {
+                error = $"Unknown log level '{args[optionIndex + 1]}'. Use error, warn, info, debug, or trace.";
+                return false;
+            }
+            return true;
+        }
+
+        if (Has(args, "--trace"))
+            level = RadialLogLevel.Trace;
+        else if (Has(args, "--debug") || Has(args, "--verbose"))
+            level = RadialLogLevel.Debug;
+        return true;
     }
 
     private static bool Has(IEnumerable<string> args, string value) =>

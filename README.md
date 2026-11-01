@@ -38,7 +38,9 @@ RadialShell.exe --self-test
 RadialShell.exe --listen
 ```
 
-`--self-test` checks target-policy precedence, theme and action registration, and the Win32 `GetCurrentThreadId` entry point. `--listen` is passive: it logs resolved targets without suppressing native right-click. Live Explorer behavior still needs validation on each supported Windows build and view mode.
+`--self-test` checks target-policy precedence, theme and action registration, logging-level parsing, and the Win32 `GetCurrentThreadId` entry point. `--listen` is passive: it reports resolved targets without suppressing native right-click. Live Explorer behavior still needs validation on each supported Windows build and view mode.
+
+Operational diagnostics are written as JSON Lines to `data\logs\radialshell.jsonl` beside the executable, with three 2 MiB rotated backups. The bounded queue keeps logging off the hook/UI caller path. Default verbosity is `info`; use `--log-level error|warn|info|debug|trace`, or the `--verbose`, `--debug`, and `--trace` shortcuts. Log records include UTC timestamp, level, event name, and message. Logging is local-only.
 
 ## Build and download
 

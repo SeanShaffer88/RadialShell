@@ -57,7 +57,7 @@ internal sealed class MouseGestureListener : IDisposable
         foreach (var point in _work.GetConsumingEnumerable())
         {
             try { _onGesture(point); }
-            catch (Exception ex) { Console.Error.WriteLine($"Target reporting failed: {ex.Message}"); }
+            catch (Exception ex) { RadialLogger.Error("gesture.report_failed", $"Target reporting failed: {ex.Message}"); }
         }
     }
 
@@ -112,6 +112,7 @@ internal sealed class MouseGestureListener : IDisposable
                 var data = Marshal.PtrToStructure<MouseLowLevelHookData>(lParam);
                 if (IsExplorerFileViewPoint(data.Point))
                 {
+                    RadialLogger.Trace("hook.gesture_queued", $"Queued shell-view gesture at ({data.Point.X}, {data.Point.Y}).");
                     _work.Add(data.Point);
                     if (_consumeGesture)
                     {

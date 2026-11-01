@@ -75,13 +75,14 @@ internal static class RadialThemeSettings
                 throw new InvalidDataException(error);
 
             if (requiresMigration && !Save(theme!.Name, out var migrationError))
-                Console.Error.WriteLine($"Theme settings migration was not saved: {migrationError} Existing settings were left unchanged.");
+                RadialLogger.Warn("settings.migration_failed", $"Theme settings migration was not saved: {migrationError} Existing settings were left unchanged.");
 
             return theme!;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(
+            RadialLogger.Warn(
+                "settings.load_failed",
                 $"Could not load theme settings: {ex.GetBaseException().Message} Existing settings were left unchanged; using the built-in default.");
             return RadialThemeCatalog.Default;
         }
