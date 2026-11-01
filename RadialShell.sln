@@ -6,6 +6,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RadialShell.Core", "src\Rad
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RadialShell.Core.Tests", "tests\RadialShell.Core.Tests\RadialShell.Core.Tests.csproj", "{A48D6D4B-7468-4C3D-B1E3-E8698889616C}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RadialShell.App", "src\RadialShell.App\RadialShell.App.csproj", "{4E6079D2-CFA3-4B1E-9A09-C964C8F85E04}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,5 +22,9 @@ Global
 		{A48D6D4B-7468-4C3D-B1E3-E8698889616C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A48D6D4B-7468-4C3D-B1E3-E8698889616C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A48D6D4B-7468-4C3D-B1E3-E8698889616C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4E6079D2-CFA3-4B1E-9A09-C964C8F85E04}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4E6079D2-CFA3-4B1E-9A09-C964C8F85E04}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4E6079D2-CFA3-4B1E-9A09-C964C8F85E04}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4E6079D2-CFA3-4B1E-9A09-C964C8F85E04}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
