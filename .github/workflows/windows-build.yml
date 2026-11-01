@@ -1,0 +1,49 @@
+name: Windows executable
+
+on:
+  push:
+    branches:
+      - arena/c04fec36-radialshell
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: 8.0.x
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build solution
+        run: dotnet build .\RadialShell.sln --configuration Release
+
+      - name: Run target policy tests
+        run: dotnet run --project .\tests\RadialShell.Core.Tests\RadialShell.Core.Tests.csproj --configuration Release
+
+      - name: Publish self-contained Windows executable
+        run: >-
+          dotnet publish .\src\RadialShell.App\RadialShell.App.csproj
+          --configuration Release --runtime win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          --output .\artifacts\RadialShell-win-x64
+
+      - name: Smoke-test executable
+        run: .\artifacts\RadialShell-win-x64\RadialShell.exe --self-test
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: RadialShell-win-x64
+          path: .\artifacts\RadialShell-win-x64\RadialShell.exe
+          if-no-files-found: error
+          retention-days: 30
