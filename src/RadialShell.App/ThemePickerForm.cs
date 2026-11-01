@@ -85,7 +85,7 @@ internal sealed class ThemePickerForm : Form
         {
             var selectedButton = gallery.Controls
                 .OfType<Button>()
-                .FirstOrDefault(button => button.AccessibleName.Contains("currently selected", StringComparison.Ordinal));
+                .FirstOrDefault(button => button.AccessibleName?.Contains("currently selected", StringComparison.Ordinal) == true);
             selectedButton?.Focus();
         };
     }

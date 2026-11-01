@@ -137,19 +137,26 @@ jobs:
           $installedExe = Join-Path $installRoot 'RadialShell.exe'
           $installArgs = "/i `"$msiPath`" /qn /norestart"
           $install = Start-Process -FilePath 'msiexec.exe' -ArgumentList $installArgs -Wait -PassThru
+          Write-Host "::notice title=MSI test::Install exit code $($install.ExitCode); executable exists: $(Test-Path $installedExe); path: $installRoot"
           if ($install.ExitCode -notin @(0, 3010) -or !(Test-Path $installedExe)) {
+            Write-Host "::error title=MSI install diagnostics::Exit code $($install.ExitCode); executable exists: $(Test-Path $installedExe); path: $installRoot"
             throw "MSI per-user installation failed with exit code $($install.ExitCode)."
           }
           foreach ($icon in @('RadialShell-enabled.ico', 'RadialShell-disabled.ico')) {
-            if (!(Test-Path (Join-Path $installRoot "Assets\$icon"))) { throw "Installed tray icon is missing: $icon" }
+            $iconPath = Join-Path $installRoot "Assets\$icon"
+            if (!(Test-Path $iconPath)) { throw "Installed tray icon is missing: $iconPath" }
           }
           & $installedExe --self-test
-          if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed.' }
+          $selfTestExitCode = $LASTEXITCODE
+          Write-Host "::notice title=MSI test::Installed self-test exit code $selfTestExitCode"
+          if ($selfTestExitCode -ne 0) { throw 'Installed application smoke test failed.' }
           $dataLog = Join-Path $installRoot 'data\logs\radialshell.jsonl'
-          if (!(Test-Path $dataLog)) { throw 'Installed application did not create its adjacent JSONL log.' }
+          if (!(Test-Path $dataLog)) { throw "Installed application did not create its adjacent JSONL log: $dataLog" }
           $uninstallArgs = "/x `"$msiPath`" /qn /norestart"
           $uninstall = Start-Process -FilePath 'msiexec.exe' -ArgumentList $uninstallArgs -Wait -PassThru
+          Write-Host "::notice title=MSI test::Uninstall exit code $($uninstall.ExitCode); executable remains: $(Test-Path $installedExe); data log remains: $(Test-Path $dataLog)"
           if ($uninstall.ExitCode -notin @(0, 3010) -or (Test-Path $installedExe)) {
+            Write-Host "::error title=MSI uninstall diagnostics::Exit code $($uninstall.ExitCode); executable remains: $(Test-Path $installedExe)"
             throw "MSI uninstall failed with exit code $($uninstall.ExitCode)."
           }
           if (!(Test-Path $dataLog)) { throw 'MSI uninstall did not preserve adjacent user data.' }
