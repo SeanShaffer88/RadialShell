@@ -18,6 +18,7 @@ internal static class Program
         {
             TargetPolicySmokeTests.Run();
             ThemeSmokeTests.Run();
+            RadialActionSmokeTests.Run();
             var threadId = MouseGestureListener.CurrentNativeThreadIdForTest();
             if (threadId == 0)
                 throw new InvalidOperationException("Win32 GetCurrentThreadId returned zero.");
@@ -73,8 +74,7 @@ internal static class Program
                 }
             }
 
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
+            InitializeWinForms();
             Application.Run(new RadialMenuPreviewForm(previewTheme));
             return 0;
         }
@@ -85,8 +85,55 @@ internal static class Program
             return 0;
         }
 
+        if (Has(args, "--run"))
+        {
+            RunWheel();
+            return 0;
+        }
+
         PrintHelp();
         return 0;
+    }
+
+    private static void RunWheel()
+    {
+        InitializeWinForms();
+        using var context = new RadialShellApplicationContext();
+        try
+        {
+            context.Start();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Could not start RadialShell: {ex.GetBaseException().Message}");
+            return;
+        }
+
+        Console.WriteLine("RadialShell is active. Alt + Right-Click in an Explorer file view to open the wheel.");
+        Console.WriteLine("Hover a slice and left-click to run it. Press Esc/right-click in the wheel to dismiss; Ctrl+C exits.");
+        Console.WriteLine("The native context menu is suppressed only for gestures in the Explorer/Desktop file view.\n");
+
+        ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            context.RequestExit();
+        };
+        Console.CancelKeyPress += cancelHandler;
+        try
+        {
+            Application.Run(context);
+        }
+        finally
+        {
+            Console.CancelKeyPress -= cancelHandler;
+        }
+    }
+
+    private static void InitializeWinForms()
+    {
+        _ = Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
     }
 
     private static void RunListener()
@@ -140,6 +187,7 @@ internal static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  RadialShell.exe --self-test       Run target and theme checks");
         Console.WriteLine("  RadialShell.exe --listen          Observe Alt+Right-Click and print resolved targets");
+        Console.WriteLine("  RadialShell.exe --run             Launch the active themed radial action wheel");
         Console.WriteLine("  RadialShell.exe --preview [name]  Preview the wheel; ←/→ changes and saves themes");
         Console.WriteLine("  RadialShell.exe --themes          List built-in themes");
         Console.WriteLine("  RadialShell.exe --theme <name>    Save the preferred theme");

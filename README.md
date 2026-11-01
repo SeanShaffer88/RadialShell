@@ -2,20 +2,25 @@
 
 Windows Explorer radial quick-action utility.
 
-## Target resolution behavior
+## Target resolution
 
-The action wheel is intended to work from Explorer file views and the Desktop, including icon, list, and details layouts. Resolve the target from the pointer position and shell-view state:
+The target policy handles selected items, an unselected item under the pointer, and blank file-view space (the current folder). Windows resolution uses Shell automation and Microsoft Active Accessibility (MSAA). Non-file-view Explorer controls are filtered in the low-level hook so their normal right-click behavior remains intact.
 
-1. **Pointer over a selected item:** target the complete current selection (multi-selection).
-2. **Pointer over an unselected item:** target that item, rather than an unrelated selection.
-3. **Pointer over empty space in a file view:** target the current folder.
-4. **Desktop:** apply the same item/selection/empty-space rules, with empty space targeting the Desktop folder.
+## Active radial wheel
 
-The platform-independent policy lives in `src/RadialShell.Core`; the Windows diagnostic uses Shell automation and Microsoft Active Accessibility (MSAA). Unresolved/non-file-view targets are reported rather than acted upon.
+Run on Windows with an interactive desktop:
 
-## Themes and wheel preview
+```powershell
+RadialShell.exe --run
+```
 
-The app includes eight built-in palettes: **Midnight, Neon Circuit, Frost, Sunset, Emerald, Paper, Ocean,** and **Orchid**. The preview uses a segmented circular menu, a center hub, high-contrast labels, and a visible hover state. Theme preference is saved in `%APPDATA%\RadialShell\settings.json`.
+Alt + Right-Click a file, folder, or blank area in an Explorer/desktop file view. The native context menu is suppressed for that gesture; once the target is resolved, the wheel appears at the pointer. Hover a slice and left-click to run it; Escape or right-click in the wheel dismisses it. If Shell target resolution fails after the gesture is consumed, the app logs the reason and does not show a wheel.
+
+The six built-in actions are **Copy Path**, **Copy Name**, **Open Folder**, **Terminal Here**, **POSIX Path**, and **Copy Contents**. Copy Contents accepts text-like extensions only and has size limits (2 MiB per file, 5 MiB total). Clipboard and process-launch actions run only after a slice is explicitly clicked.
+
+## Themes and preview
+
+Eight built-in palettes are available: **Midnight, Neon Circuit, Frost, Sunset, Emerald, Paper, Ocean,** and **Orchid**. The circular menu uses wedge separation, a center hub, contrasting labels, and hover feedback. Theme preference is saved in `%APPDATA%\RadialShell\settings.json`.
 
 ```powershell
 RadialShell.exe --themes
@@ -24,18 +29,16 @@ RadialShell.exe --preview Frost
 RadialShell.exe --theme "Neon Circuit"
 ```
 
-In the preview, use **Left/Right** to browse themes (the chosen palette is saved), hover a slice to highlight it, and press **Esc** to close. Clicking a slice is preview-only; no file action is executed.
+In preview mode, use **Left/Right** to browse and save palettes; hover a slice to see its state and press **Esc** to close. Preview clicks do not execute actions.
 
-## Diagnostic listener
-
-`RadialShell.App` is a Windows console diagnostic, not the integrated radial menu yet. It observes **Alt + Right-Click** over Explorer/Desktop, resolves a target on a separate STA worker, and prints paths. It deliberately does **not** suppress the click or native context menu while target discovery is being validated.
+## Diagnostic modes
 
 ```powershell
 RadialShell.exe --self-test
 RadialShell.exe --listen
 ```
 
-`--self-test` checks target precedence, all theme registrations, and the Win32 `GetCurrentThreadId` entry point used to start the global hook. `--listen` requires an interactive Windows desktop. Shell accessibility varies across Windows versions and Explorer layouts; live target resolution still needs manual validation.
+`--self-test` checks target-policy precedence, theme and action registration, and the Win32 `GetCurrentThreadId` entry point. `--listen` is passive: it logs resolved targets without suppressing native right-click. Live Explorer behavior still needs validation on each supported Windows build and view mode.
 
 ## Build and download
 
@@ -46,5 +49,3 @@ dotnet build .\RadialShell.sln --configuration Release
 dotnet run --project .\tests\RadialShell.Core.Tests\RadialShell.Core.Tests.csproj --configuration Release
 dotnet publish .\src\RadialShell.App\RadialShell.App.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --output .\artifacts\RadialShell-win-x64
 ```
-
-The radial menu preview and theme selection are implemented; connecting the wheel to the trigger and implementing its actions are subsequent milestones.
