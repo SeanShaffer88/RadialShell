@@ -10,9 +10,16 @@ internal sealed class RadialActionMenuForm : Form
     private const float CenterY = 190;
     private const float OuterRadius = 172;
     private const float InnerRadius = 57;
+    private const int WsExTopMost = 0x00000008;
+    private const int WsExToolWindow = 0x00000080;
+    private const int WsExNoActivate = 0x08000000;
+    private const int WmMouseActivate = 0x0021;
+    private const int MaNoActivate = 3;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpShowWindow = 0x0040;
     private readonly ShellTarget _target;
     private readonly NativePoint _triggerPoint;
-    private readonly System.Windows.Forms.Timer _closeTimer;
+    private readonly System.Windows.Forms.Timer _idleCloseTimer;
     private int _hoveredSlice = -1;
     private string? _status;
 
@@ -34,20 +41,45 @@ internal sealed class RadialActionMenuForm : Form
         Cursor = Cursors.Hand;
         Region = new Region(CreateRoundedRectangle(new Rectangle(0, 0, 380, 380), 24));
 
-        _closeTimer = new System.Windows.Forms.Timer { Interval = 1200 };
-        _closeTimer.Tick += (_, _) => { _closeTimer.Stop(); Close(); };
+        _idleCloseTimer = new System.Windows.Forms.Timer { Interval = 15000 };
+        _idleCloseTimer.Tick += (_, _) => { _idleCloseTimer.Stop(); Close(); };
     }
 
     private RadialTheme Theme { get; }
 
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.ExStyle |= WsExTopMost | WsExToolWindow | WsExNoActivate;
+            return parameters;
+        }
+    }
+
     public void ShowAtTrigger()
     {
         var screen = Screen.FromPoint(new Point(_triggerPoint.X, _triggerPoint.Y)).WorkingArea;
-        var x = Math.Clamp(_triggerPoint.X - ClientSize.Width / 2, screen.Left, screen.Right - ClientSize.Width);
-        var y = Math.Clamp(_triggerPoint.Y - ClientSize.Height / 2, screen.Top, screen.Bottom - ClientSize.Height);
+        var maxX = Math.Max(screen.Left, screen.Right - Width);
+        var maxY = Math.Max(screen.Top, screen.Bottom - Height);
+        var x = Math.Clamp(_triggerPoint.X - Width / 2, screen.Left, maxX);
+        var y = Math.Clamp(_triggerPoint.Y - Height / 2, screen.Top, maxY);
         Location = new Point(x, y);
         Show();
-        Activate();
+        if (!SetWindowPos(Handle, new IntPtr(-1), x, y, Width, Height, SwpNoActivate | SwpShowWindow))
+            Console.Error.WriteLine($"SetWindowPos failed: Win32 error {System.Runtime.InteropServices.Marshal.GetLastWin32Error()}.");
+        _idleCloseTimer.Start();
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WmMouseActivate)
+        {
+            // Keep Explorer active while routing mouse input to the topmost wheel.
+            m.Result = (IntPtr)MaNoActivate;
+            return;
+        }
+        base.WndProc(ref m);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -194,8 +226,18 @@ internal sealed class RadialActionMenuForm : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        if (e.Button == MouseButtons.Left && _hoveredSlice >= 0)
-            ExecuteAction(_hoveredSlice);
+        if (e.Button == MouseButtons.Left)
+        {
+            // Recompute from the click location instead of relying on a prior
+            // WM_MOUSEMOVE; no-activate windows can receive a click first.
+            var clickedSlice = GetSliceIndex(e.Location);
+            Console.WriteLine($"Wheel left-click at {e.Location}; slice={(clickedSlice >= 0 ? clickedSlice + 1 : 0)}.");
+            if (clickedSlice >= 0)
+            {
+                _hoveredSlice = clickedSlice;
+                ExecuteAction(clickedSlice);
+            }
+        }
         else if (e.Button == MouseButtons.Right)
             Close();
     }
@@ -208,12 +250,6 @@ internal sealed class RadialActionMenuForm : Form
             Close();
             e.Handled = true;
         }
-    }
-
-    protected override void OnDeactivate(EventArgs e)
-    {
-        base.OnDeactivate(e);
-        Close();
     }
 
     private int GetSliceIndex(Point point)
@@ -233,21 +269,28 @@ internal sealed class RadialActionMenuForm : Form
     {
         try
         {
-            _status = RadialActionExecutor.Execute(index, _target);
-            Invalidate();
-            _closeTimer.Start();
+            var result = RadialActionExecutor.Execute(index, _target);
+            Console.WriteLine($"Action complete: {result}");
+            _idleCloseTimer.Stop();
+            Close();
         }
         catch (Exception ex)
         {
-            _status = ex.GetBaseException().Message;
+            var error = ex.GetBaseException().Message;
+            Console.Error.WriteLine($"Action failed ({RadialActionCatalog.Names[index]}): {error}");
+            _status = error;
             Invalidate();
+            Close();
         }
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
-            _closeTimer.Dispose();
+            _idleCloseTimer.Dispose();
         base.Dispose(disposing);
     }
 }

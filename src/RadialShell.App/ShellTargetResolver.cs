@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using RadialShell.Core;
+using UIA = System.Windows.Automation;
 
 namespace RadialShell.App;
 
@@ -83,14 +84,15 @@ internal sealed class ShellTargetResolver
                 new AccessiblePoint { X = point.X, Y = point.Y }, out var accessible, out var child);
             accessibleObject = accessible;
             childId = child;
-            string? accessibleName = null;
+            // UI Automation exposes the virtualized file rows in current Explorer
+            // builds; MSAA often reports only the containing "Items View" pane.
+            string? accessibleName = TryGetUiAutomationItemName(point);
             string? accessibilityError = null;
-            if (accessibleResult >= 0 && accessibleObject is not null)
+            if (accessibleName is null && accessibleResult >= 0 && accessibleObject is not null)
             {
                 try
                 {
                     dynamic accessibleDispatch = accessibleObject;
-                    // IAccessible exposes this through IDispatch as accName(childId).
                     accessibleName = Convert.ToString(accessibleDispatch.accName(childId), System.Globalization.CultureInfo.InvariantCulture);
                 }
                 catch (Exception ex)
@@ -98,7 +100,7 @@ internal sealed class ShellTargetResolver
                     accessibilityError = ex.GetBaseException().Message;
                 }
             }
-            else
+            else if (accessibleName is null)
             {
                 accessibilityError = $"AccessibleObjectFromPoint returned HRESULT 0x{accessibleResult:X8}.";
             }
@@ -141,6 +143,73 @@ internal sealed class ShellTargetResolver
             ReleaseComObject(shellObject);
         }
     }
+
+    private static string? TryGetUiAutomationItemName(NativePoint point)
+    {
+        try
+        {
+            var screenPoint = new System.Windows.Point(point.X, point.Y);
+            var current = UIA.AutomationElement.FromPoint(screenPoint);
+            var walker = UIA.TreeWalker.ControlViewWalker;
+
+            for (var depth = 0; current is not null && depth < 12; depth++)
+            {
+                var info = current.Current;
+                if (IsFileItemControl(info.ControlType) && !string.IsNullOrWhiteSpace(info.Name))
+                    return info.Name;
+
+                if (info.Name.Contains("Items View", StringComparison.OrdinalIgnoreCase) ||
+                    info.ControlType == UIA.ControlType.List ||
+                    info.ControlType == UIA.ControlType.DataGrid)
+                {
+                    var listItems = current.FindAll(UIA.TreeScope.Descendants,
+                        new UIA.PropertyCondition(UIA.AutomationElement.ControlTypeProperty, UIA.ControlType.ListItem));
+                    var match = FindAccessibleItemAtPoint(listItems, screenPoint);
+                    if (match is not null) return match;
+
+                    var dataItems = current.FindAll(UIA.TreeScope.Descendants,
+                        new UIA.PropertyCondition(UIA.AutomationElement.ControlTypeProperty, UIA.ControlType.DataItem));
+                    match = FindAccessibleItemAtPoint(dataItems, screenPoint);
+                    if (match is not null) return match;
+                }
+
+                current = walker.GetParent(current);
+            }
+        }
+        catch
+        {
+            // MSAA/folder-view fallback below handles UIA providers that are absent
+            // or don't expose virtualized list rows.
+        }
+
+        return null;
+    }
+
+    private static string? FindAccessibleItemAtPoint(
+        UIA.AutomationElementCollection items,
+        System.Windows.Point point)
+    {
+        var count = Math.Min(items.Count, 5000);
+        for (var index = 0; index < count; index++)
+        {
+            try
+            {
+                var item = items[index];
+                var info = item.Current;
+                if (!info.IsOffscreen && info.BoundingRectangle.Contains(point) &&
+                    !string.IsNullOrWhiteSpace(info.Name))
+                    return info.Name;
+            }
+            catch (UIA.ElementNotAvailableException)
+            {
+                // Virtualized list items can be recycled while Explorer refreshes.
+            }
+        }
+        return null;
+    }
+
+    private static bool IsFileItemControl(UIA.ControlType type) =>
+        type == UIA.ControlType.ListItem || type == UIA.ControlType.DataItem;
 
     private static dynamic? FindShellWindow(dynamic shell, IntPtr root)
     {
