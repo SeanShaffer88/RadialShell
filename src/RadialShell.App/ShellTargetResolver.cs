@@ -84,13 +84,13 @@ internal sealed class ShellTargetResolver
                 return false;
             }
 
-            dynamic accessible = accessibleObject;
+            dynamic accessibleDispatch = accessibleObject;
             int role;
             string? accessibleName;
             try
             {
-                role = Convert.ToInt32(accessible.get_accRole(childId), System.Globalization.CultureInfo.InvariantCulture);
-                accessibleName = Convert.ToString(accessible.get_accName(childId), System.Globalization.CultureInfo.InvariantCulture);
+                role = Convert.ToInt32(accessibleDispatch.get_accRole(childId), System.Globalization.CultureInfo.InvariantCulture);
+                accessibleName = Convert.ToString(accessibleDispatch.get_accName(childId), System.Globalization.CultureInfo.InvariantCulture);
             }
             catch
             {
