@@ -31,6 +31,8 @@ internal sealed class MouseGestureListener : IDisposable
         _hookProc = HookCallback;
     }
 
+    internal static uint CurrentNativeThreadIdForTest() => GetCurrentThreadId();
+
     public void Start()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -57,25 +59,34 @@ internal sealed class MouseGestureListener : IDisposable
 
     private void HookLoop()
     {
-        _hookThreadId = GetCurrentThreadId();
-        _ = PeekMessage(out _, IntPtr.Zero, 0, 0, PmNoRemove);
-        _hook = SetWindowsHookEx(WhMouseLl, _hookProc, IntPtr.Zero, 0);
-        if (_hook == IntPtr.Zero)
+        try
         {
-            _startError = new Win32Exception(Marshal.GetLastWin32Error());
+            _hookThreadId = GetCurrentThreadId();
+            _ = PeekMessage(out _, IntPtr.Zero, 0, 0, PmNoRemove);
+            _hook = SetWindowsHookEx(WhMouseLl, _hookProc, IntPtr.Zero, 0);
+            if (_hook == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+
             _hookReady.Set();
-            return;
+            while (GetMessage(out var message, IntPtr.Zero, 0, 0) > 0)
+            {
+                TranslateMessage(ref message);
+                DispatchMessage(ref message);
+            }
         }
-
-        _hookReady.Set();
-        while (GetMessage(out var message, IntPtr.Zero, 0, 0) > 0)
+        catch (Exception ex)
         {
-            TranslateMessage(ref message);
-            DispatchMessage(ref message);
+            _startError = ex;
+            _hookReady.Set();
         }
-
-        _ = UnhookWindowsHookEx(_hook);
-        _hook = IntPtr.Zero;
+        finally
+        {
+            if (_hook != IntPtr.Zero)
+            {
+                _ = UnhookWindowsHookEx(_hook);
+                _hook = IntPtr.Zero;
+            }
+        }
     }
 
     private IntPtr HookCallback(int code, IntPtr wParam, IntPtr lParam)
@@ -173,7 +184,7 @@ internal sealed class MouseGestureListener : IDisposable
     private static extern bool TranslateMessage(ref Message message);
     [DllImport("user32.dll")]
     private static extern IntPtr DispatchMessage(ref Message message);
-    [DllImport("user32.dll")]
+    [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")]
     private static extern bool PostThreadMessage(uint threadId, uint message, IntPtr wParam, IntPtr lParam);
