@@ -11,8 +11,6 @@ namespace RadialShell.App;
 internal sealed class ShellTargetResolver
 {
     private const uint GaRoot = 2;
-    private const int RoleList = 0x21;
-    private const int RoleListItem = 0x22;
 
     public bool TryResolve(NativePoint point, out ShellTarget? target, out string message)
     {
@@ -74,46 +72,43 @@ internal sealed class ShellTargetResolver
                 return false;
             }
 
+            var inFolderView = isDesktop || IsInExplorerFileView(point);
+            if (!inFolderView)
+            {
+                message = "The pointer is over a shell control rather than the file-view surface.";
+                return false;
+            }
+
             var accessibleResult = AccessibleObjectFromPoint(
                 new AccessiblePoint { X = point.X, Y = point.Y }, out var accessible, out var child);
             accessibleObject = accessible;
             childId = child;
-            if (accessibleResult < 0 || accessibleObject is null)
+            string? accessibleName = null;
+            string? accessibilityError = null;
+            if (accessibleResult >= 0 && accessibleObject is not null)
             {
-                message = "Windows accessibility did not identify a file-view target.";
-                return false;
-            }
-
-            dynamic accessibleDispatch = accessibleObject;
-            int role;
-            string? accessibleName;
-            try
-            {
-                role = Convert.ToInt32(accessibleDispatch.get_accRole(childId), System.Globalization.CultureInfo.InvariantCulture);
-                accessibleName = Convert.ToString(accessibleDispatch.get_accName(childId), System.Globalization.CultureInfo.InvariantCulture);
-            }
-            catch
-            {
-                if (!isDesktop)
+                try
                 {
-                    message = "The pointer is over a shell control rather than a file-view item.";
-                    return false;
+                    dynamic accessibleDispatch = accessibleObject;
+                    // IAccessible exposes this through IDispatch as accName(childId).
+                    accessibleName = Convert.ToString(accessibleDispatch.accName(childId), System.Globalization.CultureInfo.InvariantCulture);
                 }
-
-                // WorkerW/Progman wallpaper surfaces sometimes expose an incomplete
-                // accessibility role; when the Desktop namespace itself is hit, use
-                // the Desktop folder as the blank-space target.
-                role = 0;
-                accessibleName = null;
+                catch (Exception ex)
+                {
+                    accessibilityError = ex.GetBaseException().Message;
+                }
+            }
+            else
+            {
+                accessibilityError = $"AccessibleObjectFromPoint returned HRESULT 0x{accessibleResult:X8}.";
             }
 
-            // List-item accessibility names are matched against the shell folder's
-            // own item collection so actions receive canonical filesystem paths.
+            // Match accessible item text to the shell folder's canonical items. If
+            // this Windows view doesn't expose a usable MSAA name, fall back to the
+            // current folder rather than swallowing the gesture without a menu.
             ShellItem? hovered = null;
-            if (role == RoleListItem && !string.IsNullOrWhiteSpace(accessibleName))
+            if (!string.IsNullOrWhiteSpace(accessibleName))
                 hovered = FindFolderItem(folderObject, accessibleName!);
-
-            var inFolderView = isDesktop || role is (RoleList or RoleListItem);
             var snapshot = new ShellViewSnapshot(
                 currentFolderPath,
                 selected,
@@ -127,7 +122,11 @@ internal sealed class ShellTargetResolver
                 return false;
             }
 
-            message = "Target resolved.";
+            message = target!.Kind == ShellTargetKind.Folder && accessibilityError is not null
+                ? $"Resolved the current folder; MSAA item details were unavailable ({accessibilityError})."
+                : target.Kind == ShellTargetKind.Folder && !string.IsNullOrWhiteSpace(accessibleName) && hovered is null
+                    ? $"Resolved the current folder; accessible item '{accessibleName}' did not match a shell item."
+                    : "Target resolved.";
             return true;
         }
         catch (Exception ex)
@@ -251,6 +250,20 @@ internal sealed class ShellTargetResolver
         return hit == IntPtr.Zero ? IntPtr.Zero : GetAncestor(hit, GaRoot);
     }
 
+    private static bool IsInExplorerFileView(NativePoint point)
+    {
+        var hit = WindowFromPoint(new AccessiblePoint { X = point.X, Y = point.Y });
+        var root = hit == IntPtr.Zero ? IntPtr.Zero : GetAncestor(hit, GaRoot);
+        for (var current = hit; current != IntPtr.Zero; current = GetParent(current))
+        {
+            if (GetClassName(current) == "SHELLDLL_DefView")
+                return true;
+            if (current == root)
+                break;
+        }
+        return false;
+    }
+
     private static string GetClassName(IntPtr window)
     {
         if (window == IntPtr.Zero) return string.Empty;
@@ -285,6 +298,8 @@ internal sealed class ShellTargetResolver
     private static extern IntPtr WindowFromPoint(AccessiblePoint point);
     [DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetParent(IntPtr hwnd);
     [DllImport("user32.dll", EntryPoint = "GetClassNameW", CharSet = CharSet.Unicode)]
     private static extern int GetWindowClassName(IntPtr hwnd, StringBuilder className, int maxCount);
 }
