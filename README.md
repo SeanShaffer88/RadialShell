@@ -14,7 +14,7 @@ Run on Windows with an interactive desktop:
 RadialShell.exe --run
 ```
 
-Alt + Right-Click a file, folder, or blank area in an Explorer/desktop file view. The native context menu is suppressed for that gesture; once the target is resolved, the wheel appears at the pointer. Hover a slice and left-click to run it; Escape or right-click in the wheel dismisses it. If Shell target resolution fails after the gesture is consumed, the app logs the reason and does not show a wheel.
+Alt + Right-Click a file, folder, or blank area in an Explorer/Desktop file view. The native context menu is suppressed for that gesture. The wheel appears at the pointer once the shell view is identified; if MSAA cannot name the item, it falls back to the current folder and logs that fallback. Hover a slice and left-click to run it; Escape or right-click in the wheel dismisses it. If the shell window or current folder cannot be resolved, the app logs the failure and does not show a wheel.
 
 The six built-in actions are **Copy Path**, **Copy Name**, **Open Folder**, **Terminal Here**, **POSIX Path**, and **Copy Contents**. Copy Contents accepts text-like extensions only and has size limits (2 MiB per file, 5 MiB total). Clipboard and process-launch actions run only after a slice is explicitly clicked.
 

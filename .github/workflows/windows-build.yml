@@ -3,7 +3,7 @@ name: Windows executable
 on:
   push:
     branches:
-      - arena/b24e0839-radialshell
+      - arena/d988fac2-radialshell
   workflow_dispatch:
 
 permissions:

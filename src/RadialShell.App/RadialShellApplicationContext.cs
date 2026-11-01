@@ -32,6 +32,9 @@ internal sealed class RadialShellApplicationContext : ApplicationContext
             return;
         }
 
+        if (!string.Equals(message, "Target resolved.", StringComparison.Ordinal))
+            Console.WriteLine($"Target fallback: {message}");
+
         try
         {
             _dispatcher.BeginInvoke((Action)(() => ShowActionMenu(point, target!)));
