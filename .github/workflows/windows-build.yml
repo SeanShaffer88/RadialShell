@@ -40,6 +40,17 @@ jobs:
       - name: Smoke-test executable
         run: .\artifacts\RadialShell-win-x64\RadialShell.exe --self-test
 
+      - name: Verify local structured log
+        shell: pwsh
+        run: |
+          $log = '.\artifacts\RadialShell-win-x64\data\logs\radialshell.jsonl'
+          if (!(Test-Path $log)) { throw 'JSONL log was not created.' }
+          $entries = Get-Content $log | ForEach-Object { $_ | ConvertFrom-Json }
+          $entry = $entries | Where-Object { $_.event -eq 'self_test.logger' } | Select-Object -Last 1
+          if ($null -eq $entry -or $entry.level -ne 'INFO' -or !$entry.timestampUtc) {
+            throw 'Expected structured logger smoke-test entry was not found.'
+          }
+
       - name: Generate SHA-256 checksum
         shell: pwsh
         run: |

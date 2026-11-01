@@ -67,7 +67,7 @@ internal sealed class RadialActionMenuForm : Form
         Location = new Point(x, y);
         Show();
         if (!SetWindowPos(Handle, new IntPtr(-1), x, y, Width, Height, SwpNoActivate | SwpShowWindow))
-            Console.Error.WriteLine($"SetWindowPos failed: Win32 error {System.Runtime.InteropServices.Marshal.GetLastWin32Error()}.");
+            RadialLogger.Error("wheel.position_failed", $"SetWindowPos failed: Win32 error {System.Runtime.InteropServices.Marshal.GetLastWin32Error()}.");
         _idleCloseTimer.Start();
     }
 
@@ -231,7 +231,7 @@ internal sealed class RadialActionMenuForm : Form
             // Recompute from the click location instead of relying on a prior
             // WM_MOUSEMOVE; no-activate windows can receive a click first.
             var clickedSlice = GetSliceIndex(e.Location);
-            Console.WriteLine($"Wheel left-click at {e.Location}; slice={(clickedSlice >= 0 ? clickedSlice + 1 : 0)}.");
+            RadialLogger.Debug("wheel.slice_clicked", $"Wheel left-click at {e.Location}; slice={(clickedSlice >= 0 ? clickedSlice + 1 : 0)}.");
             if (clickedSlice >= 0)
             {
                 _hoveredSlice = clickedSlice;
@@ -270,14 +270,14 @@ internal sealed class RadialActionMenuForm : Form
         try
         {
             var result = RadialActionExecutor.Execute(index, _target);
-            Console.WriteLine($"Action complete: {result}");
+            RadialLogger.Info("action.completed", $"{RadialActionCatalog.Names[index]}: {result}");
             _idleCloseTimer.Stop();
             Close();
         }
         catch (Exception ex)
         {
             var error = ex.GetBaseException().Message;
-            Console.Error.WriteLine($"Action failed ({RadialActionCatalog.Names[index]}): {error}");
+            RadialLogger.Error("action.failed", $"{RadialActionCatalog.Names[index]}: {error}");
             _status = error;
             Invalidate();
             Close();

@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace RadialShell.App;
 
@@ -42,25 +43,116 @@ internal static class RadialThemeCatalog
 
 internal static class RadialThemeSettings
 {
-    private sealed record Preferences(string? Theme);
+    private const int CurrentSchemaVersion = 1;
+    private const long MaxSettingsBytes = 64 * 1024;
+
+    private sealed record Preferences(
+        [property: JsonPropertyName("schema_version")] int SchemaVersion,
+        [property: JsonPropertyName("theme")] string Theme);
 
     private static readonly string SettingsPath = Path.Combine(
         AppContext.BaseDirectory, "data", "settings.json");
 
     public static RadialTheme Load()
     {
+        if (!File.Exists(SettingsPath))
+            return RadialThemeCatalog.Default;
+
         try
         {
-            var preferences = JsonSerializer.Deserialize<Preferences>(File.ReadAllText(SettingsPath));
-            if (RadialThemeCatalog.TryFind(preferences?.Theme, out var theme))
-                return theme;
+            var settingsBytes = File.ReadAllBytes(SettingsPath);
+            if (settingsBytes.LongLength > MaxSettingsBytes)
+                throw new InvalidDataException($"Settings file exceeds {MaxSettingsBytes} bytes.");
+
+            using var document = JsonDocument.Parse(settingsBytes, new JsonDocumentOptions
+            {
+                MaxDepth = 8,
+                CommentHandling = JsonCommentHandling.Disallow,
+                AllowTrailingCommas = false
+            });
+
+            if (!TryReadSettings(document.RootElement, out var theme, out var requiresMigration, out var error))
+                throw new InvalidDataException(error);
+
+            if (requiresMigration && !Save(theme!.Name, out var migrationError))
+                RadialLogger.Warn("settings.migration_failed", $"Theme settings migration was not saved: {migrationError} Existing settings were left unchanged.");
+
+            return theme!;
         }
-        catch
+        catch (Exception ex)
         {
-            // Missing or malformed preferences fall back to the safe default theme.
+            RadialLogger.Warn(
+                "settings.load_failed",
+                $"Could not load theme settings: {ex.GetBaseException().Message} Existing settings were left unchanged; using the built-in default.");
+            return RadialThemeCatalog.Default;
+        }
+    }
+
+    internal static bool TryReadSettings(
+        JsonElement root,
+        out RadialTheme? theme,
+        out bool requiresMigration,
+        out string? error)
+    {
+        theme = null;
+        requiresMigration = false;
+        error = null;
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            error = "The settings root must be a JSON object.";
+            return false;
         }
 
-        return RadialThemeCatalog.Default;
+        string? themeName;
+        if (!root.TryGetProperty("schema_version", out var schemaElement))
+        {
+            // Version 0 was the original { "Theme": "..." } file written beside
+            // the executable. Preserve its value by migrating it explicitly to v1.
+            if (!TryGetStringProperty(root, "Theme", out themeName) &&
+                !TryGetStringProperty(root, "theme", out themeName))
+            {
+                error = "Unversioned settings must contain a string Theme value.";
+                return false;
+            }
+            requiresMigration = true;
+        }
+        else
+        {
+            if (schemaElement.ValueKind != JsonValueKind.Number || !schemaElement.TryGetInt32(out var version))
+            {
+                error = "schema_version must be an integer.";
+                return false;
+            }
+            if (version != CurrentSchemaVersion)
+            {
+                error = $"Settings schema version {version} is not supported; this build supports version {CurrentSchemaVersion}.";
+                return false;
+            }
+            if (!TryGetStringProperty(root, "theme", out themeName))
+            {
+                error = "Version 1 settings must contain a string theme value.";
+                return false;
+            }
+        }
+
+        if (!RadialThemeCatalog.TryFind(themeName, out var resolvedTheme))
+        {
+            error = $"Unknown theme '{themeName}'.";
+            return false;
+        }
+
+        theme = resolvedTheme;
+        return true;
+    }
+
+    private static bool TryGetStringProperty(JsonElement root, string propertyName, out string? value)
+    {
+        value = null;
+        if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+            return false;
+        value = property.GetString();
+        return !string.IsNullOrWhiteSpace(value);
     }
 
     public static bool Save(string themeName, out string? error)
@@ -82,7 +174,10 @@ internal static class RadialThemeSettings
                 temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
                 bufferSize: 4096, FileOptions.WriteThrough))
             {
-                JsonSerializer.Serialize(stream, new Preferences(theme.Name), new JsonSerializerOptions { WriteIndented = true });
+                JsonSerializer.Serialize(
+                    stream,
+                    new Preferences(CurrentSchemaVersion, theme.Name),
+                    new JsonSerializerOptions { WriteIndented = true });
                 stream.Flush(flushToDisk: true);
             }
 

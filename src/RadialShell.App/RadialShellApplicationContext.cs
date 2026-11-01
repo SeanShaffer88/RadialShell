@@ -29,12 +29,12 @@ internal sealed class RadialShellApplicationContext : ApplicationContext
     {
         if (!_resolver.TryResolve(point, out var target, out var message))
         {
-            Console.WriteLine($"Gesture ignored: {message}");
+            RadialLogger.Warn("gesture.ignored", message);
             return;
         }
 
         if (!string.Equals(message, "Target resolved.", StringComparison.Ordinal))
-            Console.WriteLine($"Target fallback: {message}");
+            RadialLogger.Warn("target.fallback", message);
 
         try
         {
@@ -52,14 +52,15 @@ internal sealed class RadialShellApplicationContext : ApplicationContext
         _menu?.Dispose();
 
         _menu = new RadialActionMenuForm(target, RadialThemeSettings.Load(), point);
-        _menu.Shown += (_, _) => Console.WriteLine($"Radial wheel shown for {target.Kind} target at {_menu.Bounds} (topmost={_menu.TopMost}).");
+        _menu.Shown += (_, _) => RadialLogger.Info(
+            "wheel.shown", $"Radial wheel shown for {target.Kind} target at {_menu.Bounds} (topmost={_menu.TopMost}).");
         _menu.FormClosed += (_, _) =>
         {
             _dispatcher.UnregisterEscape();
             _menu = null;
         };
         if (!_dispatcher.RegisterEscape())
-            Console.WriteLine("Escape hotkey unavailable; right-click the wheel or wait for it to dismiss.");
+            RadialLogger.Warn("wheel.escape_unavailable", "Escape hotkey unavailable; right-click the wheel or wait for it to dismiss.");
         _menu.ShowAtTrigger();
     }
 
