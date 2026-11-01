@@ -87,7 +87,7 @@ internal sealed class ShellTargetResolver
             // or named text descendants rather than ListItem/DataItem controls.
             var folderItems = GetFolderItems(folderObject);
             var hovered = TryGetUiAutomationItem(point, folderItems);
-            string? accessibleName = hovered?.Name;
+            string? accessibleName = hovered is null ? null : Path.GetFileName(hovered.Path);
             string? accessibilityError = null;
             if (hovered is null)
             {
