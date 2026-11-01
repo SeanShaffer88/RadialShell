@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using RadialShell.Core;
 
@@ -8,6 +9,10 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        var trayLaunch = IsTrayLaunch(args);
+        if (!trayLaunch)
+            AttachConsoleForCommandLineMode();
+
         if (Has(args, "--help") || Has(args, "-h"))
         {
             PrintHelp();
@@ -94,9 +99,9 @@ internal static class Program
             return 0;
         }
 
-        if (Has(args, "--run"))
+        if (trayLaunch)
         {
-            RunWheel();
+            RunTrayApplication();
             return 0;
         }
 
@@ -104,38 +109,19 @@ internal static class Program
         return 0;
     }
 
-    private static void RunWheel()
+    private static void RunTrayApplication()
     {
         InitializeWinForms();
         using var context = new RadialShellApplicationContext();
         try
         {
             context.Start();
+            RadialLogger.Info("app.started", "RadialShell tray application started disabled.");
+            Application.Run(context);
         }
         catch (Exception ex)
         {
             RadialLogger.Error("app.start.failed", $"Could not start RadialShell: {ex.GetBaseException().Message}");
-            return;
-        }
-
-        RadialLogger.Info("app.started", "RadialShell active-wheel mode started.");
-        Console.WriteLine("RadialShell is active. Alt + Right-Click in an Explorer file view to open the wheel.");
-        Console.WriteLine("Hover a slice and left-click to run it. Press Esc/right-click in the wheel to dismiss; Ctrl+C exits.");
-        Console.WriteLine("The native context menu is suppressed only for gestures in the Explorer/Desktop file view.\n");
-
-        ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
-        {
-            eventArgs.Cancel = true;
-            context.RequestExit();
-        };
-        Console.CancelKeyPress += cancelHandler;
-        try
-        {
-            Application.Run(context);
-        }
-        finally
-        {
-            Console.CancelKeyPress -= cancelHandler;
         }
     }
 
@@ -198,7 +184,8 @@ internal static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  RadialShell.exe --self-test       Run target and theme checks");
         Console.WriteLine("  RadialShell.exe --listen          Observe Alt+Right-Click and print resolved targets");
-        Console.WriteLine("  RadialShell.exe --run             Launch the active themed radial action wheel");
+        Console.WriteLine("  RadialShell.exe                    Start the tray app (disabled until left-clicked)");
+        Console.WriteLine("  RadialShell.exe --run             Start the tray app without a console window");
         Console.WriteLine("  RadialShell.exe --preview [name]  Preview the wheel; ←/→ changes and saves themes");
         Console.WriteLine("  RadialShell.exe --themes          List built-in themes");
         Console.WriteLine("  RadialShell.exe --theme <name>    Save the preferred theme");
@@ -207,6 +194,50 @@ internal static class Program
         Console.WriteLine("\nStructured logs are written under .\\data\\logs and rotated within a bounded size.");
         Console.WriteLine("The diagnostic listener is passive and does not suppress the native context menu.");
     }
+
+    private static bool IsTrayLaunch(IReadOnlyList<string> args)
+    {
+        if (args.Count == 0)
+            return true;
+
+        var runRequested = false;
+        for (var index = 0; index < args.Count; index++)
+        {
+            if (string.Equals(args[index], "--run", StringComparison.OrdinalIgnoreCase))
+                runRequested = true;
+            else if (string.Equals(args[index], "--log-level", StringComparison.OrdinalIgnoreCase))
+            {
+                if (index + 1 >= args.Count || args[index + 1].StartsWith("--", StringComparison.Ordinal) ||
+                    !RadialLogger.TryParseLevel(args[index + 1], out _))
+                    return false;
+                index++;
+            }
+            else if (!string.Equals(args[index], "--verbose", StringComparison.OrdinalIgnoreCase) &&
+                     !string.Equals(args[index], "--debug", StringComparison.OrdinalIgnoreCase) &&
+                     !string.Equals(args[index], "--trace", StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        return runRequested;
+    }
+
+    private static void AttachConsoleForCommandLineMode()
+    {
+        if (!AttachConsole(AttachParentProcess) && Marshal.GetLastWin32Error() != ErrorAccessDenied)
+            _ = AllocConsole();
+
+        Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+        Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
+        Console.SetIn(new StreamReader(Console.OpenStandardInput()));
+    }
+
+    private const uint AttachParentProcess = 0xFFFFFFFF;
+    private const int ErrorAccessDenied = 5;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(uint processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AllocConsole();
 
     internal static bool TryGetLogLevel(IReadOnlyList<string> args, out RadialLogLevel level, out string? error)
     {

@@ -27,6 +27,7 @@ internal sealed class MouseGestureListener : IDisposable
     private IntPtr _hook;
     private Exception? _startError;
     private bool _disposed;
+    private int _stopRequested;
 
     public MouseGestureListener(Action<NativePoint> onGesture, bool consumeGesture = false)
     {
@@ -164,17 +165,27 @@ internal sealed class MouseGestureListener : IDisposable
         return className.ToString();
     }
 
+    public void RequestStop()
+    {
+        if (Interlocked.Exchange(ref _stopRequested, 1) != 0)
+            return;
+        _work.CompleteAdding();
+        if (_hookThreadId != 0)
+            _ = PostThreadMessage(_hookThreadId, WmQuit, IntPtr.Zero, IntPtr.Zero);
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        if (_hookThreadId != 0)
-            _ = PostThreadMessage(_hookThreadId, WmQuit, IntPtr.Zero, IntPtr.Zero);
-        _work.CompleteAdding();
+        RequestStop();
         _hookThread?.Join(TimeSpan.FromSeconds(3));
         _workerThread?.Join(TimeSpan.FromSeconds(3));
-        _work.Dispose();
-        _hookReady.Dispose();
+        if (_hookThread?.IsAlive != true && _workerThread?.IsAlive != true)
+        {
+            _work.Dispose();
+            _hookReady.Dispose();
+        }
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
